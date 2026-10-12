@@ -1,11 +1,11 @@
 import { Image, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useState } from "react";
+import { useAuth } from "@clerk/clerk-expo";
 
 import { icons } from "@/constants";
 import { ui } from "@/constants/theme";
+import { fetchAPI } from "@/lib/fetch";
 import { GoogleInputProps } from "@/types/type";
-
-const geoapifyKey = process.env.EXPO_PUBLIC_GEOAPIFY_API_KEY;
 
 const GoogleTextInput = ({
   icon,
@@ -14,6 +14,7 @@ const GoogleTextInput = ({
   textInputBackgroundColor,
   handlePress,
 }: GoogleInputProps) => {
+  const { getToken } = useAuth();
   const [text, setText] = useState("");
   const [places, setPlaces] = useState<any[]>([]);
 
@@ -26,21 +27,22 @@ const GoogleTextInput = ({
     }
 
     try {
-      const response = await fetch(
-        `https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(
-          value
-        )}&limit=5&apiKey=${geoapifyKey}`
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Your sign-in has expired. Sign in again to search places.");
+      }
+      const data = await fetchAPI(
+        `/(api)/places?text=${encodeURIComponent(value)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      const data = await response.json();
-
-      if (data.features) {
-        setPlaces(data.features);
+      if (data?.data?.features) {
+        setPlaces(data.data.features);
       } else {
         setPlaces([]);
       }
     } catch (error) {
-      console.log("Geoapify autocomplete error:", error);
+      console.warn("Place autocomplete request failed:", error);
       setPlaces([]);
     }
   };

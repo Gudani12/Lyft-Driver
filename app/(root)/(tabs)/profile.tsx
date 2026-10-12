@@ -90,7 +90,7 @@ const STATUS_PILL_CONFIG: Record<
 
 const Profile = () => {
   const { user } = useUser();
-  const { signOut } = useAuth();
+  const { getToken, signOut } = useAuth();
 
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -202,7 +202,9 @@ const Profile = () => {
       const image = await fn();
       if (!image) return;
 
-      const url = await uploadAvatar(user.id, image);
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in has expired. Sign in again to upload files.");
+      const url = await uploadAvatar(user.id, image, token);
 
       if (target === "avatar") {
         await fetchAPI("/(api)/profile", {
@@ -248,7 +250,9 @@ const Profile = () => {
       if (!image) return;
 
       // 1. Upload to secure private storage
-      const path = await uploadDocument(user.id, kind, image);
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in has expired. Sign in again to upload files.");
+      const path = await uploadDocument(user.id, kind, image, token);
 
       // 2. Automated verification & registry check
       const result = await verifyDocumentAutomated({
@@ -298,7 +302,9 @@ const Profile = () => {
     }
 
     try {
-      const url = await getSignedUrl(docPath, 60); // 60s temporary signed URL
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in has expired. Sign in again to view files.");
+      const url = await getSignedUrl(docPath, token, 60);
       if (url) {
         setPreviewImageUri(url);
       } else {

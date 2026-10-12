@@ -1,4 +1,5 @@
 import { Driver, MarkerData } from "@/types/type";
+import { fetchAPI } from "@/lib/fetch";
 
 export const generateMarkersFromData = ({
   data,
@@ -124,34 +125,31 @@ export const fetchRouteCoordinates = async ({
   originLongitude,
   destinationLatitude,
   destinationLongitude,
+  token,
 }: {
   originLatitude: number;
   originLongitude: number;
   destinationLatitude: number;
   destinationLongitude: number;
+  token: string;
 }) => {
-  const googleApiKey =
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? process.env.EXPO_PUBLIC_MAPS_API_KEY;
-
   try {
-    if (googleApiKey) {
-      const googleResponse = await fetch(
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${originLatitude},${originLongitude}&destination=${destinationLatitude},${destinationLongitude}&mode=driving&key=${googleApiKey}`,
-      );
-      const googleData = await googleResponse.json();
-      const polyline = googleData?.routes?.[0]?.overview_polyline?.points;
-
-      if (polyline) {
-        return decodePolyline(polyline);
-      }
+    const params = new URLSearchParams({
+      originLatitude: String(originLatitude),
+      originLongitude: String(originLongitude),
+      destinationLatitude: String(destinationLatitude),
+      destinationLongitude: String(destinationLongitude),
+    });
+    const response = await fetchAPI(`/(api)/directions?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (typeof response?.data?.polyline === "string") {
+      return decodePolyline(response.data.polyline);
     }
-
-    const osrmResponse = await fetch(
-      `https://router.project-osrm.org/route/v1/driving/${originLongitude},${originLatitude};${destinationLongitude},${destinationLatitude}?overview=full&geometries=geojson`,
-    );
-    const osrmData = await osrmResponse.json();
-    const routeCoordinates = osrmData?.routes?.[0]?.geometry?.coordinates ?? [];
-
+    const routeCoordinates = response?.data?.coordinates;
+    if (!Array.isArray(routeCoordinates)) {
+      throw new Error("Render returned no route coordinates.");
+    }
     return routeCoordinates.map(([longitude, latitude]: [number, number]) => ({
       latitude,
       longitude,

@@ -1,6 +1,7 @@
 ﻿import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Text, View } from "react-native";
+import { useAuth } from "@clerk/clerk-expo";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -21,7 +22,6 @@ import customMapStyle from "@/constants/mapStyle";
 import { brand, ui } from "@/constants/theme";
 import { fetchAPI } from "@/lib/fetch";
 import { calculateRegion, fetchRouteCoordinates } from "@/lib/map";
-import { getSupabaseClient } from "@/lib/supabase";
 import { useLocationStore } from "@/store";
 
 type Hub = {
@@ -48,6 +48,7 @@ export default function Map({
   dropoffLongitude?: number | null;
   dropoffAddress?: string | null;
 }) {
+  const { getToken } = useAuth();
   const { userLatitude, userLongitude, selectedHubId, setHubPickup } = useLocationStore();
   const [hubs, setHubs] = useState<Hub[]>([]);
   const [driverToPickupRoute, setDriverToPickupRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
@@ -58,23 +59,7 @@ export default function Map({
 
     const loadHubs = async () => {
       try {
-        const result =
-          Platform.OS === "web"
-            ? await fetchAPI("/(api)/hubs")
-            : await (async () => {
-                const supabase = await getSupabaseClient();
-                const { data, error } = await supabase
-                  .from("hubs")
-                  .select("id, name, address, latitude, longitude, radius")
-                  .eq("status", "active")
-                  .order("name");
-
-                if (error) {
-                  throw error;
-                }
-
-                return { data };
-              })();
+        const result = await fetchAPI("/(api)/hubs");
         const nextHubs = Array.isArray(result?.data)
           ? result.data
               .map((hub: Partial<Hub>) => ({
@@ -117,32 +102,47 @@ export default function Map({
         return;
       }
 
-      const driverToPickup =
-        passengerLatitude != null && passengerLongitude != null
-          ? await fetchRouteCoordinates({
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error("Your sign-in has expired. Sign in again to load routes.");
+        }
+
+        const driverToPickup =
+          passengerLatitude != null && passengerLongitude != null
+            ? await fetchRouteCoordinates({
               originLatitude: userLatitude,
               originLongitude: userLongitude,
               destinationLatitude: passengerLatitude,
               destinationLongitude: passengerLongitude,
+              token,
             })
-          : [];
+            : [];
 
-      const pickupToDropoff =
-        passengerLatitude != null &&
-        passengerLongitude != null &&
-        dropoffLatitude != null &&
-        dropoffLongitude != null
-          ? await fetchRouteCoordinates({
+        const pickupToDropoff =
+          passengerLatitude != null &&
+          passengerLongitude != null &&
+          dropoffLatitude != null &&
+          dropoffLongitude != null
+            ? await fetchRouteCoordinates({
               originLatitude: passengerLatitude,
               originLongitude: passengerLongitude,
               destinationLatitude: dropoffLatitude,
               destinationLongitude: dropoffLongitude,
+              token,
             })
-          : [];
+            : [];
 
-      if (!ignore) {
-        setDriverToPickupRoute(driverToPickup);
-        setPickupToDropoffRoute(pickupToDropoff);
+        if (!ignore) {
+          setDriverToPickupRoute(driverToPickup);
+          setPickupToDropoffRoute(pickupToDropoff);
+        }
+      } catch (error) {
+        console.warn("Unable to load map routes", error);
+        if (!ignore) {
+          setDriverToPickupRoute([]);
+          setPickupToDropoffRoute([]);
+        }
       }
     };
 
@@ -151,7 +151,7 @@ export default function Map({
     return () => {
       ignore = true;
     };
-  }, [userLatitude, userLongitude, passengerLatitude, passengerLongitude, dropoffLatitude, dropoffLongitude]);
+  }, [getToken, userLatitude, userLongitude, passengerLatitude, passengerLongitude, dropoffLatitude, dropoffLongitude]);
 
   const region = calculateRegion({
     userLatitude,

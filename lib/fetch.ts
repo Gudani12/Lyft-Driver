@@ -2,12 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 
 const API_ORIGIN = "https://lyft-driver.onrender.com";
 
+export const getApiUrl = (url: string) => {
+  if (/^[a-z][a-z\d+.-]*:/i.test(url)) {
+    return url;
+  }
+
+  const endpoint = url.replace(/^\/\(api\)(?=\/|$)/, "");
+  return new URL(endpoint, `${API_ORIGIN}/`).toString();
+};
+
 export const fetchAPI = async (url: string, options?: RequestInit) => {
   try {
-    const requestUrl = /^[a-z][a-z\d+.-]*:/i.test(url)
-      ? url
-      : new URL(url, `${API_ORIGIN}/`).toString();
-    const response = await fetch(requestUrl, options);
+    const response = await fetch(getApiUrl(url), options);
     if (!response.ok) {
       const contentType = response.headers.get("content-type") ?? "";
       let errorMessage = `HTTP error! status: ${response.status}`;

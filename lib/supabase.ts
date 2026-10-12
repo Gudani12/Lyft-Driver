@@ -1,27 +1,5 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-
-const resolveEnv = (...names: string[]) => {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value) {
-      return value;
-    }
-  }
-
-  return undefined;
-};
-
-const supabaseUrl = resolveEnv(
-  "NEXT_PUBLIC_SUPABASE_URL",
-  "EXPO_PUBLIC_SUPABASE_URL",
-  "SUPABASE_URL",
-);
-const supabaseAnonKey = resolveEnv(
-  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-  "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-  "SUPABASE_PUBLISHABLE_KEY",
-  "SUPABASE_ANON_KEY",
-);
+import { fetchAPI } from "@/lib/fetch";
 
 const shouldUseNodeTransport = () => {
   return typeof window === "undefined" && typeof process !== "undefined" && !!process.versions?.node;
@@ -42,8 +20,12 @@ const getNodeWsTransport = async () => {
 };
 
 export async function getSupabaseClient() {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Supabase environment variables are not configured.");
+  const config = await fetchAPI("/(api)/client-config");
+  const supabaseUrl = config?.data?.supabaseUrl;
+  const supabasePublishableKey = config?.data?.supabasePublishableKey;
+
+  if (typeof supabaseUrl !== "string" || typeof supabasePublishableKey !== "string") {
+    throw new Error("Supabase client configuration is missing from the Render API.");
   }
 
   const options: Record<string, unknown> = {
@@ -61,5 +43,5 @@ export async function getSupabaseClient() {
     };
   }
 
-  return createSupabaseClient(supabaseUrl, supabaseAnonKey, options as never);
+  return createSupabaseClient(supabaseUrl, supabasePublishableKey, options as never);
 }

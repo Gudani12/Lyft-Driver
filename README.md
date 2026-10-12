@@ -80,16 +80,26 @@ npm install
 
 ---
 
-## 3. Create a `.env` File
+## 3. Configure the app
 
-```env
-EXPO_PUBLIC_FIREBASE_API_KEY=your_key
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=000000
-EXPO_PUBLIC_FIREBASE_APP_ID=1:000:web:000
-```
+The mobile app does not require a local `.env` file. App API calls, Clerk client
+configuration, place autocomplete, map previews, and route lookup use the Render
+service at `https://lyft-driver.onrender.com`.
+
+Set the following values in the Render service's environment settings:
+
+- `CLERK_PUBLISHABLE_KEY` — public Clerk publishable key returned to the app.
+- `CLERK_SECRET_KEY` — Clerk server secret; never expose it to the mobile app.
+- `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` — public client configuration
+  returned by Render; privileged Supabase keys stay server-side.
+- `GEOAPIFY_API_KEY` — used by Render for autocomplete and static map previews.
+- `GOOGLE_MAPS_API_KEY` — optional server-side Directions API key; routing falls
+  back to OSRM if it is not configured.
+- Supabase, Stripe, Didit, and webhook credentials required by the API routes.
+
+The native Google Maps SDK key is configured in `app.json` because iOS/Android
+maps require a key in the native app. Restrict it to this app's bundle/package
+identifiers and the Maps SDK APIs; do not use a server secret as a native key.
 
 ---
 
@@ -120,11 +130,10 @@ The Render build exports only the production API routes. The start command runs
 Expo's production server on Render's `PORT`; do not use `npm start`, which runs
 the Expo development server and does not bind a production HTTP port.
 
-Add the required server-only values from `.env.example` in the Render
-environment settings. Never set secret credentials as `EXPO_PUBLIC_*` or add
-them to Expo `extra`. In particular, `SUPABASE_SERVICE_ROLE_KEY`,
-`CLERK_SECRET_KEY`, Stripe secret keys, and webhook secrets must remain
-server-side.
+Add the required credentials in Render's environment settings. Never set
+server-side secrets as `EXPO_PUBLIC_*` or add them to Expo `extra`. In
+particular, `SUPABASE_SERVICE_ROLE_KEY`, `CLERK_SECRET_KEY`, Stripe secret keys,
+and webhook secrets must remain server-side.
 
 After deployment, confirm `https://<your-render-service>/health` returns
 `{"status":"ok","service":"Lyft Driver API"}`.

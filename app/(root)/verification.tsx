@@ -1,4 +1,4 @@
-import { useUser } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -144,6 +144,7 @@ const STATUS_PILL_CONFIG: Record<
 };
 
 const DriverVerification = () => {
+  const { getToken } = useAuth();
   const { user } = useUser();
   const insets = useSafeAreaInsets();
 
@@ -301,7 +302,9 @@ const DriverVerification = () => {
 
     try {
       // 1. Upload to secure private storage
-      const path = await uploadDocument(user.id, kind, image);
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in has expired. Sign in again to upload files.");
+      const path = await uploadDocument(user.id, kind, image, token);
 
       // 2. Automated document validation & cross-matching
       const result = await verifyDocumentAutomated({
@@ -383,7 +386,9 @@ const DriverVerification = () => {
     const saved = savedDocs[kind]?.path;
     if (saved) {
       try {
-        const signed = await getSignedUrl(saved, 60); // 60s short-lived signed URL
+        const token = await getToken();
+        if (!token) throw new Error("Your sign-in has expired. Sign in again to view files.");
+        const signed = await getSignedUrl(saved, token, 60);
         if (signed) {
           setPreviewImageUri(signed);
         } else {

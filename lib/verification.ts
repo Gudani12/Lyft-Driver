@@ -29,7 +29,6 @@ function decode(base64: string): ArrayBuffer {
 import * as ImagePicker from "expo-image-picker";
 
 import { fetchAPI } from "@/lib/fetch";
-import { getSupabaseClient } from "@/lib/supabase";
 
 export const BUCKET = "verification-documents";
 
@@ -106,6 +105,28 @@ async function getImageBuffer(image: PickedImage): Promise<ArrayBuffer> {
   }
 
   return await response.arrayBuffer();
+}
+
+function encodeBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let encoded = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const a = bytes[index];
+    const hasB = index + 1 < bytes.length;
+    const hasC = index + 2 < bytes.length;
+    const b = hasB ? bytes[index + 1] : 0;
+    const c = hasC ? bytes[index + 2] : 0;
+    encoded +=
+      B64[a >> 2] +
+      B64[((a & 3) << 4) | (b >> 4)] +
+      (hasB ? B64[((b & 15) << 2) | (c >> 6)] : "=") +
+      (hasC ? B64[c & 63] : "=");
+  }
+  return encoded;
+}
+
+async function getImageBase64(image: PickedImage): Promise<string> {
+  return image.base64 ?? encodeBase64(await getImageBuffer(image));
 }
 
 export const DOC_LABELS: Record<DocKind, { title: string; help: string }> = {
@@ -208,31 +229,28 @@ export async function uploadDocument(
   clerkId: string,
   kind: DocKind,
   image: PickedImage,
+  token: string,
 ): Promise<string> {
   // POPIA & Zero-trust: Enforce file format and size limits before upload
   validateDocumentSecurity(image);
 
-  const supabase = await getSupabaseClient();
-
   const extension = image.mimeType.includes("png") ? "png" : "jpg";
   const path = `${clerkId}/${kind}-${Date.now()}.${extension}`;
-  const buffer = await getImageBuffer(image);
-
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, buffer, {
+  const result = await fetchAPI("/(api)/storage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      bucket: BUCKET,
+      path,
+      base64: await getImageBase64(image),
       contentType: image.mimeType,
       upsert: false,
-    });
-
-  if (error) {
-    console.error("Document upload failed:", error);
-    throw new Error(
-      "We couldn't upload that image. Check your connection and try again.",
-    );
-  }
-
-  return path;
+    }),
+  });
+  return result.data.path;
 }
 
 export async function verifyDocumentAutomated(payload: {
@@ -259,52 +277,49 @@ export async function verifyDocumentAutomated(payload: {
 export async function uploadAvatar(
   clerkId: string,
   image: PickedImage,
+  token: string,
 ): Promise<string> {
-  const supabase = await getSupabaseClient();
-
   const extension = image.mimeType.includes("png") ? "png" : "jpg";
   const path = `${clerkId}/avatar-${Date.now()}.${extension}`;
-  const buffer = await getImageBuffer(image);
-
-  const { error } = await supabase.storage
-    .from("avatars")
-    .upload(path, buffer, {
+  const result = await fetchAPI("/(api)/storage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      bucket: "avatars",
+      path,
+      base64: await getImageBase64(image),
       contentType: image.mimeType,
       upsert: true,
-    });
-
-  if (error) {
-    console.error("Avatar upload failed:", error);
-    throw new Error("We couldn't upload that photo. Please try again.");
+    }),
+  });
+  if (typeof result?.data?.publicUrl !== "string") {
+    throw new Error("Render did not return a public avatar URL.");
   }
-
-  const { data } = supabase.storage
-    .from("avatars")
-    .getPublicUrl(path);
-
-  if (!data?.publicUrl) {
-    throw new Error("We couldn't generate a public URL for the avatar.");
-  }
-
-  return data.publicUrl;
+  return result.data.publicUrl;
 }
 
 export async function getSignedUrl(
   path: string,
+  token: string,
   expiresInSeconds = 60,
 ): Promise<string | null> {
-  const supabase = await getSupabaseClient();
-
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .createSignedUrl(path, expiresInSeconds);
-
-  if (error) {
+  try {
+    const params = new URLSearchParams({
+      bucket: BUCKET,
+      path,
+      expiresInSeconds: String(expiresInSeconds),
+    });
+    const result = await fetchAPI(`/(api)/storage?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return result?.data?.signedUrl ?? null;
+  } catch (error) {
     console.warn("Could not sign document URL:", error);
     return null;
   }
-
-  return data?.signedUrl ?? null;
 }
 
 // ─── Didit: Verification flow ───────────────────────────────────────────────

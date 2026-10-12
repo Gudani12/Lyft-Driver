@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Image,
@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 
-import { fetchAPI } from "@/lib/fetch";
+import { fetchAPI, getApiUrl } from "@/lib/fetch";
 import {
   estimateArrivalTime,
   estimateRideDurationMinutes,
@@ -75,6 +75,7 @@ const Action = ({
 
 const RequestCard = ({ ride, onChanged }: Props) => {
   const { getToken } = useAuth();
+  const [imageToken, setImageToken] = useState<string | null>(null);
   const [status, setStatus] = useState<string>((ride as any).status ?? "booked");
   const [busy, setBusy] = useState(false);
   const [ratingVisible, setRatingVisible] = useState(false);
@@ -100,6 +101,21 @@ const RequestCard = ({ ride, onChanged }: Props) => {
   const estimatedDropoff = estimateArrivalTime(when, duration);
 
   const s = (STATUS as any)[status] ?? STATUS.booked;
+
+  useEffect(() => {
+    let mounted = true;
+    getToken()
+      .then((token) => {
+        if (mounted) setImageToken(token);
+      })
+      .catch((error) => {
+        console.warn("Unable to authorize map preview", error);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [getToken]);
 
   const run = async (
     action: RideAction,
@@ -215,7 +231,12 @@ const RequestCard = ({ ride, onChanged }: Props) => {
       <View className="relative">
         <Image
           source={{
-            uri: `https://maps.geoapify.com/v1/staticmap?style=osm-bright&width=600&height=400&center=lonlat:${ride.destination_longitude},${ride.destination_latitude}&zoom=14&apiKey=${process.env.EXPO_PUBLIC_GEOAPIFY_API_KEY}`,
+            uri: getApiUrl(
+              `/(api)/places-static-map?latitude=${ride.destination_latitude}&longitude=${ride.destination_longitude}`,
+            ),
+            headers: imageToken
+              ? { Authorization: `Bearer ${imageToken}` }
+              : undefined,
           }}
           className="h-32 w-full bg-[#F0E6FA]"
         />
