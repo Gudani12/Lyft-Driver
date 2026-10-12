@@ -18,6 +18,8 @@ const Layout = () => {
       <Stack.Screen name="bank-details" />
       <Stack.Screen name="chat/[rideId]" />
       <Stack.Screen name="edit-profile" />
+      <Stack.Screen name="help-support" />
+      <Stack.Screen name="support-chat" />
     </Stack>
   );
 };

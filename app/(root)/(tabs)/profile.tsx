@@ -886,6 +886,12 @@ const Profile = () => {
             </Text>
             <View className="mb-7">
               <SectionCard
+                title="Help & Support"
+                value="Browse driver help topics or chat with AI support"
+                icon="help-circle-outline"
+                onPress={() => router.push("/(root)/help-support")}
+              />
+              <SectionCard
                 title="WhatsApp Driver Line"
                 value="Direct support via WhatsApp"
                 icon="logo-whatsapp"

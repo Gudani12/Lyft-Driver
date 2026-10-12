@@ -90,6 +90,8 @@ Set the following values in the Render service's environment settings:
 
 - `CLERK_PUBLISHABLE_KEY` — public Clerk publishable key returned to the app.
 - `CLERK_SECRET_KEY` — Clerk server secret; never expose it to the mobile app.
+- `GEMINI_API_KEY` — server-only key used by the authenticated driver support
+  chat at `/support/chat`.
 - `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` — public client configuration
   returned by Render; privileged Supabase keys stay server-side.
 - `GEOAPIFY_API_KEY` — used by Render for autocomplete and static map previews.
