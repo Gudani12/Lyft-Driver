@@ -2,7 +2,7 @@ import { ClerkLoaded, ClerkProvider } from "@clerk/clerk-expo";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, LogBox, Pressable, Text, View } from "react-native";
+import { LogBox, Pressable, Text, View } from "react-native";
 import "react-native-reanimated";
 import "../global.css";
 
@@ -53,30 +53,14 @@ export default function RootLayout() {
     void loadClientConfig();
   }, [loadClientConfig]);
 
-  useEffect(() => {
-    if (loaded && splashDone) {
-      // Once the custom animation completes, the app content can render.
-    }
-  }, [loaded, splashDone]);
+  const finishSplash = useCallback(() => setSplashDone(true), []);
 
-  if (!splashDone || !loaded) {
-    return <AnimatedSplash onFinish={() => setSplashDone(true)} />;
+  if (splashDone && (!loaded || configLoading)) {
+    return <AnimatedSplash onFinish={finishSplash} hold />;
   }
 
-  if (configLoading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: brand.deep,
-        }}
-      >
-        <ActivityIndicator color="white" />
-        <Text style={{ color: "white", marginTop: 12 }}>Connecting to Render...</Text>
-      </View>
-    );
+  if (!splashDone || !loaded) {
+    return <AnimatedSplash onFinish={finishSplash} />;
   }
 
   if (!publishableKey) {

@@ -11,6 +11,7 @@ import { brand } from "@/constants/theme";
 
 type Props = {
   onFinish: () => void;
+  hold?: boolean;
 };
 
 const { width: screenWidth } = Dimensions.get("window");
@@ -23,7 +24,7 @@ const archStroke = Math.min(Math.max(screenWidth * 0.05, 22), 42);
 const paddingBottom = Math.min(Math.max(screenWidth * 0.05, 20), 48);
 const overlapOffset = Math.min(Math.max(screenWidth * 0.02, 8), 18);
 
-export default function AnimatedSplash({ onFinish }: Props) {
+export default function AnimatedSplash({ onFinish, hold = false }: Props) {
   const progress = useRef(new Animated.Value(0)).current;
   const rootFade = useRef(new Animated.Value(1)).current;
   const rootScale = useRef(new Animated.Value(1)).current;
@@ -48,36 +49,39 @@ export default function AnimatedSplash({ onFinish }: Props) {
 
     logoAnimation.start();
 
-    const splashAnimation = Animated.sequence([
-      Animated.delay(1800),
-      Animated.parallel([
-        Animated.timing(rootFade, {
-          toValue: 0,
-          duration: 420,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(rootScale, {
-          toValue: 1.06,
-          duration: 420,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    ]);
+    let splashAnimation: Animated.CompositeAnimation | undefined;
+    if (!hold) {
+      splashAnimation = Animated.sequence([
+        Animated.delay(1800),
+        Animated.parallel([
+          Animated.timing(rootFade, {
+            toValue: 0,
+            duration: 420,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(rootScale, {
+            toValue: 1.06,
+            duration: 420,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+      ]);
 
-    splashAnimation.start(({ finished }) => {
-      if (finished) {
-        logoAnimation.stop();
-        onFinish();
-      }
-    });
+      splashAnimation.start(({ finished }) => {
+        if (finished) {
+          logoAnimation.stop();
+          onFinish();
+        }
+      });
+    }
 
     return () => {
       logoAnimation.stop();
-      splashAnimation.stop();
+      splashAnimation?.stop();
     };
-  }, [onFinish, progress, rootFade, rootScale]);
+  }, [hold, onFinish, progress, rootFade, rootScale]);
 
   const archRotation = progress.interpolate({
     inputRange: [0, 0.5, 1],
