@@ -88,6 +88,12 @@ export function supportErrorMessage(error: unknown): string {
   if (/AI_SUPPORT_NOT_CONFIGURED/i.test(message)) {
     return "AI Support is not configured on Render yet. Please contact Driver Support. The server needs GEMINI_API_KEY.";
   }
+  if (/AI_SUPPORT_CONFIG_ERROR/i.test(message)) {
+    return "Render could not authenticate with Gemini. Check that GEMINI_API_KEY is valid and enabled for the Gemini API.";
+  }
+  if (/AI_SUPPORT_MODEL_UNAVAILABLE/i.test(message)) {
+    return "The configured Gemini model is unavailable. Please contact the server owner to update the support model.";
+  }
   if (/AI_SUPPORT_RATE_LIMITED|429/i.test(message)) {
     return "AI Support has reached its Gemini request limit. Please try again later or contact Driver Support.";
   }

@@ -133,25 +133,27 @@ export async function POST(request: Request) {
   }
 
   try {
+    const conversation = [
+      `Driver support topic: ${category}.`,
+      ...history.map((entry) =>
+        `${entry.role === "assistant" ? "Driver Support" : "Driver"}: ${entry.text}`,
+      ),
+      `Driver: ${message}`,
+      "Driver Support:",
+    ].join("\n");
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      `https://generativelanguage.googleapis.com/v1beta/interactions`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTIONS }] },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: `Driver support topic: ${category}.` }],
-            },
-            ...history.map((entry) => ({
-              role: entry.role === "assistant" ? "model" : "user",
-              parts: [{ text: entry.text }],
-            })),
-            { role: "user", parts: [{ text: message }] },
-          ],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 512 },
+          model: "gemini-3.1-flash-lite",
+          system_instruction: SYSTEM_INSTRUCTIONS,
+          input: conversation,
+          generation_config: { thinking_level: "low" },
         }),
       },
     );
@@ -160,15 +162,24 @@ export async function POST(request: Request) {
       if (response.status === 429) {
         return Response.json({ error: "AI_SUPPORT_RATE_LIMITED" }, { status: 503 });
       }
-      console.error(`Gemini support request failed with status ${response.status}.`);
+      const errorBody = await response.json().catch(() => null);
+      const providerCode = errorBody?.error?.status;
+      console.error("Gemini support request failed", {
+        status: response.status,
+        code: typeof providerCode === "string" ? providerCode : undefined,
+      });
+      if ([400, 401, 403].includes(response.status)) {
+        return Response.json({ error: "AI_SUPPORT_CONFIG_ERROR" }, { status: 503 });
+      }
+      if (response.status === 404) {
+        return Response.json({ error: "AI_SUPPORT_MODEL_UNAVAILABLE" }, { status: 503 });
+      }
       return Response.json({ error: "AI_SUPPORT_UPSTREAM_ERROR" }, { status: 502 });
     }
 
     const result = await response.json();
-    const reply = result?.candidates?.[0]?.content?.parts
-      ?.map((part: { text?: string }) => part.text ?? "")
-      .join("")
-      .trim()
+    const reply = result?.output_text
+      ?.trim()
       .replace(/\*\*(.+?)\*\*/g, "$1")
       .replace(/__(.+?)__/g, "$1");
     if (typeof reply !== "string" || !reply) {

@@ -67,7 +67,7 @@ describe("driver support chat API", () => {
     const fetchMock = jest.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          candidates: [{ content: { parts: [{ text: "Check the Earnings screen." }] } }],
+          output_text: "Check the Earnings screen.",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -92,9 +92,32 @@ describe("driver support chat API", () => {
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain(
-      "models/gemini-2.5-flash:generateContent",
-    );
-    expect(String(fetchMock.mock.calls[0][0])).toContain("server-only-test-key");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/v1beta/interactions");
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      "x-goog-api-key": "server-only-test-key",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      model: "gemini-3.1-flash-lite",
+      system_instruction: expect.any(String),
+      generation_config: { thinking_level: "low" },
+    });
+  });
+
+  it("returns a clear message when Render has an invalid Gemini key", async () => {
+    process.env.GEMINI_API_KEY = "server-only-test-key";
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { status: "PERMISSION_DENIED" } }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    const { POST } = require("../app/(api)/support/chat+api");
+    const response = await POST(makeRequest({ message: "How do payouts work?" }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "AI_SUPPORT_CONFIG_ERROR",
+    });
   });
 });

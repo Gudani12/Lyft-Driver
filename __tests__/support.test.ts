@@ -26,6 +26,12 @@ describe("driver support helpers", () => {
     expect(supportErrorMessage(new Error("Endpoint not found"))).toMatch(
       /endpoint is not available/i,
     );
+    expect(supportErrorMessage(new Error("AI_SUPPORT_CONFIG_ERROR"))).toMatch(
+      /GEMINI_API_KEY/i,
+    );
+    expect(supportErrorMessage(new Error("AI_SUPPORT_MODEL_UNAVAILABLE"))).toMatch(
+      /model is unavailable/i,
+    );
   });
 
   it("distinguishes rate limits, auth failures, and offline errors", () => {
