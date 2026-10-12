@@ -8,9 +8,10 @@ export async function GET(request: Request) {
     throw error;
   }
 
-  const apiKey = process.env.GEOAPIFY_API_KEY;
+  const apiKey =
+    process.env.EXPO_PUBLIC_GEOAPIFY_API_KEY ?? process.env.GEOAPIFY_API_KEY;
   if (!apiKey) {
-    console.error("GEOAPIFY_API_KEY is not configured on the API server.");
+    console.error("No Geoapify API key is configured on the API server.");
     return Response.json(
       { error: "Map previews are not configured on the API server." },
       { status: 503 },

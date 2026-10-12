@@ -28,7 +28,10 @@ export async function GET(request: Request) {
     return Response.json({ error: "Valid origin and destination coordinates are required." }, { status: 400 });
   }
 
-  const googleApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const googleApiKey =
+    process.env.EXPO_PUBLIC_DIRECTIONS_API_KEY ??
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ??
+    process.env.GOOGLE_MAPS_API_KEY;
   if (googleApiKey) {
     const googleUrl = new URL("https://maps.googleapis.com/maps/api/directions/json");
     googleUrl.searchParams.set("origin", `${originLatitude},${originLongitude}`);
