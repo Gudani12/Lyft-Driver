@@ -6,6 +6,9 @@ const requestsByUser = new Map<string, number[]>();
 
 type ChatMessage = { role: "user" | "model"; text: string };
 
+type InteractionContent = { type?: unknown; text?: unknown };
+type InteractionStep = { type?: unknown; content?: unknown };
+
 const SYSTEM_INSTRUCTIONS = `You are the official AI support assistant for Lyft Driver, a driver app for the Hop On carpooling platform.
 
 Help drivers with creating and managing trips, passenger requests, earnings, payouts, bank details, driver verification, vehicle documents, accounts, and safety.
@@ -41,6 +44,45 @@ const isSafetyEmergency = (message: string) =>
   /\b(in immediate danger|i(?:'m| am) in danger|driver.{0,30}threaten|passenger.{0,30}threaten|i was threatened|don't feel safe|do not feel safe|emergency|attacking me|following me|help me)\b/i.test(
     message,
   );
+
+function getInteractionReply(result: unknown): string | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+
+  const interaction = result as {
+    output_text?: unknown;
+    steps?: unknown;
+  };
+  if (typeof interaction.output_text === "string" && interaction.output_text.trim()) {
+    return interaction.output_text.trim();
+  }
+  if (!Array.isArray(interaction.steps)) return null;
+
+  const textParts: string[] = [];
+  let collecting = false;
+
+  outer: for (let i = interaction.steps.length - 1; i >= 0; i -= 1) {
+    const step = interaction.steps[i] as InteractionStep | null;
+    if (!step || typeof step !== "object") continue;
+    if (step.type === "user_input") break;
+    if (step.type !== "model_output" || !Array.isArray(step.content)) {
+      if (collecting) break;
+      continue;
+    }
+
+    for (let j = step.content.length - 1; j >= 0; j -= 1) {
+      const content = step.content[j] as InteractionContent | null;
+      if (content?.type === "text" && typeof content.text === "string") {
+        collecting = true;
+        textParts.push(content.text);
+      } else if (collecting) {
+        break outer;
+      }
+    }
+  }
+
+  const reply = textParts.reverse().join("").trim();
+  return reply || null;
+}
 
 function checkRateLimit(userId: string): boolean {
   const now = Date.now();
@@ -178,7 +220,7 @@ export async function POST(request: Request) {
     }
 
     const result = await response.json();
-    const reply = result?.output_text
+    const reply = getInteractionReply(result)
       ?.trim()
       .replace(/\*\*(.+?)\*\*/g, "$1")
       .replace(/__(.+?)__/g, "$1");

@@ -67,7 +67,12 @@ describe("driver support chat API", () => {
     const fetchMock = jest.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          output_text: "Check the Earnings screen.",
+          steps: [
+            {
+              type: "model_output",
+              content: [{ type: "text", text: "Check the Earnings screen." }],
+            },
+          ],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
