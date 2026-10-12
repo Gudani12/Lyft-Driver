@@ -1,5 +1,5 @@
 ﻿import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Text, View } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
 
@@ -49,6 +49,8 @@ export default function Map({
   dropoffAddress?: string | null;
 }) {
   const { getToken } = useAuth();
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
   const { userLatitude, userLongitude, selectedHubId, setHubPickup } = useLocationStore();
   const [hubs, setHubs] = useState<Hub[]>([]);
   const [driverToPickupRoute, setDriverToPickupRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
@@ -97,13 +99,13 @@ export default function Map({
 
     const loadRoutes = async () => {
       if (userLatitude == null || userLongitude == null) {
-        setDriverToPickupRoute([]);
-        setPickupToDropoffRoute([]);
+        setDriverToPickupRoute((route) => (route.length === 0 ? route : []));
+        setPickupToDropoffRoute((route) => (route.length === 0 ? route : []));
         return;
       }
 
       try {
-        const token = await getToken();
+        const token = await getTokenRef.current();
         if (!token) {
           throw new Error("Your sign-in has expired. Sign in again to load routes.");
         }
@@ -140,8 +142,8 @@ export default function Map({
       } catch (error) {
         console.warn("Unable to load map routes", error);
         if (!ignore) {
-          setDriverToPickupRoute([]);
-          setPickupToDropoffRoute([]);
+          setDriverToPickupRoute((route) => (route.length === 0 ? route : []));
+          setPickupToDropoffRoute((route) => (route.length === 0 ? route : []));
         }
       }
     };
@@ -151,7 +153,7 @@ export default function Map({
     return () => {
       ignore = true;
     };
-  }, [getToken, userLatitude, userLongitude, passengerLatitude, passengerLongitude, dropoffLatitude, dropoffLongitude]);
+  }, [userLatitude, userLongitude, passengerLatitude, passengerLongitude, dropoffLatitude, dropoffLongitude]);
 
   const region = calculateRegion({
     userLatitude,
