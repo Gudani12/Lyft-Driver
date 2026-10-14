@@ -127,9 +127,9 @@ const Earnings = () => {
       await load();
 
       Alert.alert(
-        isMock ? "Mock withdrawal complete" : "Withdrawal requested",
+        isMock ? "Withdrawal recorded" : "Withdrawal requested",
         isMock
-          ? `R${requested} was recorded as a simulated withdrawal. No Stripe payout or real bank transfer was made.`
+          ? `R${requested} was recorded. No bank transfer was made.`
           : `Your request for R${requested} to your bank account ending ${summary?.bank_account_last4} is pending processing. You can track it in withdrawal history.`,
       );
     } catch (error: any) {
@@ -254,7 +254,7 @@ const Earnings = () => {
                 </Text>
                 <Text className="mt-0.5 text-[12px] font-Jakarta text-[#746A7E]">
                   {isMockWithdrawal
-                    ? "Bank account not needed for test simulation"
+                    ? "Bank account not needed for test withdrawals"
                     : hasBank
                       ? "Payouts are sent here"
                       : "Add one to receive your earnings"}
@@ -277,7 +277,7 @@ const Earnings = () => {
             ) : (
               payouts.map((payout) => {
                 const s = payout.is_mock
-                  ? { bg: "bg-[#F0E6FA]", text: "text-[#5A189A]", label: "Simulated" }
+                  ? { bg: "bg-[#F0E6FA]", text: "text-[#5A189A]", label: "Recorded" }
                   : STATUS[payout.status] ?? STATUS.pending;
                 return (
                   <View
@@ -350,7 +350,7 @@ const Earnings = () => {
               <Text className="mt-1 text-[13px] font-Jakarta text-[#746A7E]">
                 R{available.toFixed(2)} available
                 {isMockWithdrawal
-                  ? " · simulation only"
+                  ? " · test withdrawals"
                   : hasBank
                     ? ` · account ending ${summary?.bank_account_last4}`
                     : ""}
@@ -358,7 +358,7 @@ const Earnings = () => {
 
               {isMockWithdrawal && (
                 <Text className="mt-2 text-[12px] font-JakartaMedium text-[#D99A1B]">
-                  Test simulation only. No money will be transferred.
+                  Test withdrawals only. No bank transfer will be made.
                 </Text>
               )}
 
@@ -410,7 +410,7 @@ const Earnings = () => {
                 <Ionicons name="time-outline" size={15} color="#5A189A" />
                 <Text className="flex-1 text-[11.5px] font-Jakarta leading-4 text-[#746A7E]">
                   {isMockWithdrawal
-                    ? "This test simulation changes the app balance only. No payment is sent."
+                    ? "This records the withdrawal in your account balance. No bank transfer is made."
                     : "Your request will be reviewed before payout and will appear in your withdrawal history."}
                 </Text>
               </View>
@@ -420,10 +420,10 @@ const Earnings = () => {
                   title={
                     submitting
                       ? isMockWithdrawal
-                        ? "Simulating…"
+                        ? "Recording…"
                         : "Requesting…"
                       : isMockWithdrawal
-                        ? `Simulate R${requested || 0} withdrawal`
+                        ? `Withdraw R${requested || 0}`
                         : `Withdraw R${requested || 0}`
                   }
                   loading={submitting}
