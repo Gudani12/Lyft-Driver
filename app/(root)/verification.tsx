@@ -36,10 +36,10 @@ import {
   getSignedUrl,
   pickFromLibrary,
   startDiditVerification,
+  startDocumentAI,
   uploadDocument,
-  verifyDocumentAutomated,
   verifyDrivingLicenceNATIS,
-  verifySouthAfricanIdDatabase,
+  verifySouthAfricanIdDatabase
 } from "@/lib/verification";
 
 type SavedDoc = {
@@ -318,6 +318,7 @@ const DriverVerification = () => {
   const totalDone = identityDone + licenceDone + docsDone;
   const progress = Math.min(100, Math.round((totalDone / totalItems) * 100));
 
+  // ─── Upload + Document AI ──────────────────────────────────────────────
   const handleUploadSingleDocument = async (
     kind: DocKind,
     image: PickedImage,
@@ -326,6 +327,7 @@ const DriverVerification = () => {
     setUploadingKind(kind);
 
     try {
+      // 1. Upload to Supabase Storage
       const token = await getToken();
       if (!token)
         throw new Error(
@@ -333,59 +335,44 @@ const DriverVerification = () => {
         );
       const path = await uploadDocument(user.id, kind, image, token);
 
-      const result = await verifyDocumentAutomated({
-        clerkId: user.id,
-        docKind: kind,
-        filePath: path,
-        expiryDate: expiries[kind] ?? null,
-      });
-
+      // 2. Show as pending immediately so admin sees it
       setSavedDocs((prev) => ({
         ...prev,
         [kind]: {
           path,
-          status: result?.status ?? "pending_review",
+          status: "pending_review",
           expires_on: expiries[kind] ?? null,
-          failure_reason: result?.failureReason ?? null,
+          failure_reason: null,
         },
       }));
       setPicked((prev) => ({ ...prev, [kind]: image }));
 
-      if (result?.status === "verified") {
-        Alert.alert(
-          "Automated Verification Passed",
-          `${DOC_LABELS[kind].title} has been verified and confirmed against official records.`,
-        );
-      } else if (result?.status === "expired") {
-        Alert.alert(
-          "Document Expired",
-          result?.failureReason ??
-          "This document is expired. Please upload a valid document.",
-        );
-      } else if (result?.status === "mismatch") {
-        Alert.alert(
-          "Information Mismatch",
-          result?.failureReason ??
-          "The details on this document do not match your registered profile.",
-        );
-      } else {
-        Alert.alert(
-          "Document Uploaded",
-          `${DOC_LABELS[kind].title} received and routed for compliance verification.`,
-        );
-      }
+      // 3. Start Document AI session for this specific upload
+      const session = await startDocumentAI(user.id, kind);
 
-      await load();
+      // 4. Open the Didit hosted flow in the WebView
+      setActiveDocForAction(null);
+      setUploadingKind(null);
+
+      router.push({
+        pathname: "/(root)/didit-webview",
+        params: {
+          url: session.url,
+          sessionId: session.session_id,
+          docType: kind,
+          clerkId: user.id,
+        },
+      });
     } catch (err: any) {
       Alert.alert("Upload Failed", err?.message ?? "Please try again.");
-    } finally {
       setUploadingKind(null);
       setActiveDocForAction(null);
     }
   };
 
   const selectPhotoSource = (kind: DocKind, source: "camera" | "library") => {
-    const fn = source === "camera" ? () => captureImage(false) : pickFromLibrary;
+    const fn =
+      source === "camera" ? () => captureImage(false) : pickFromLibrary;
 
     (async () => {
       try {
@@ -521,7 +508,8 @@ const DriverVerification = () => {
       }
     } catch (err: any) {
       setSaIdError(
-        err?.message ?? "Verification request failed. Please check connection.",
+        err?.message ??
+        "Verification request failed. Please check connection.",
       );
     } finally {
       setSaIdSubmitting(false);
@@ -976,6 +964,7 @@ const DriverVerification = () => {
         </ScrollView>
       )}
 
+      {/* DOCUMENT ACTION SHEET MODAL */}
       <Modal
         visible={Boolean(activeDocForAction)}
         transparent
@@ -1056,6 +1045,7 @@ const DriverVerification = () => {
         </Pressable>
       </Modal>
 
+      {/* FULLSCREEN PREVIEW MODAL */}
       <Modal
         visible={Boolean(previewImageUri)}
         transparent
@@ -1089,6 +1079,7 @@ const DriverVerification = () => {
         </View>
       </Modal>
 
+      {/* DRIVING LICENCE MODAL */}
       <Modal
         visible={licenceModalVisible}
         animationType="slide"
@@ -1214,6 +1205,7 @@ const DriverVerification = () => {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* SA ID HOME AFFAIRS MODAL */}
       <Modal
         visible={saIdModalVisible}
         animationType="slide"

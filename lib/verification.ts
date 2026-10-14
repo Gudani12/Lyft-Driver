@@ -356,7 +356,7 @@ export async function getSignedUrl(
   }
 }
 
-// ─── Didit: Verification flow ───────────────────────────────────────────────
+// ─── Didit: KYC workflow ────────────────────────────────────────────────────
 
 export type DiditDocType = "id" | "passport" | "licence";
 
@@ -427,6 +427,43 @@ export async function verifySouthAfricanIdDatabase(payload: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+// ─── Didit: Document AI workflow ────────────────────────────────────────────
+
+export type DocumentAIStartResult = {
+  session_id: string;
+  session_token: string;
+  url: string;
+};
+
+/**
+ * Start a Document AI session for a specific uploaded document.
+ * The driver opens the returned `url` in a WebView to complete the flow.
+ * The webhook receives the extracted fields when the flow finishes.
+ */
+export async function startDocumentAI(
+  clerkId: string,
+  docKind: DocKind,
+  callbackUrl?: string,
+): Promise<DocumentAIStartResult> {
+  console.log(`DOCUMENT-AI: creating session for ${clerkId} (${docKind})`);
+
+  const res = await fetchAPI("/(api)/document-ai-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clerkId, docKind, callbackUrl }),
+  });
+
+  const session: DocumentAIStartResult | undefined = res?.data ?? res;
+
+  if (!session?.url) {
+    throw new Error(
+      "Could not start Document AI. Please check your connection and try again.",
+    );
+  }
+
+  return session;
 }
 
 // ─── Submitting ──────────────────────────────────────────────────────────────
