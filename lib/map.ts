@@ -140,9 +140,13 @@ export const fetchRouteCoordinates = async ({
       destinationLatitude: String(destinationLatitude),
       destinationLongitude: String(destinationLongitude),
     });
-    const response = await fetchAPI(`/(api)/directions?${params.toString()}`, {
+    const response = await fetchAPI(
+      `/(api)/directions?${params.toString()}`,
+      {
       headers: { Authorization: `Bearer ${token}` },
-    });
+      },
+      { logErrors: false },
+    );
     if (typeof response?.data?.polyline === "string") {
       return decodePolyline(response.data.polyline);
     }
@@ -155,6 +159,14 @@ export const fetchRouteCoordinates = async ({
       longitude,
     }));
   } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === "Route lookup is temporarily unavailable." ||
+        error.message === "No driving route was found.")
+    ) {
+      return [];
+    }
+
     console.warn("Unable to load route polyline", error);
     return [];
   }

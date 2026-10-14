@@ -129,7 +129,7 @@ const Earnings = () => {
       Alert.alert(
         isMock ? "Withdrawal recorded" : "Withdrawal requested",
         isMock
-          ? `R${requested} was recorded. No bank transfer was made.`
+          ? `R${requested} was recorded.`
           : `Your request for R${requested} to your bank account ending ${summary?.bank_account_last4} is pending processing. You can track it in withdrawal history.`,
       );
     } catch (error: any) {
@@ -358,7 +358,7 @@ const Earnings = () => {
 
               {isMockWithdrawal && (
                 <Text className="mt-2 text-[12px] font-JakartaMedium text-[#D99A1B]">
-                  Test withdrawals only. No bank transfer will be made.
+                  Test withdrawals only.
                 </Text>
               )}
 
@@ -410,7 +410,7 @@ const Earnings = () => {
                 <Ionicons name="time-outline" size={15} color="#5A189A" />
                 <Text className="flex-1 text-[11.5px] font-Jakarta leading-4 text-[#746A7E]">
                   {isMockWithdrawal
-                    ? "This records the withdrawal in your account balance. No bank transfer is made."
+                    ? "This records the withdrawal in your account balance."
                     : "Your request will be reviewed before payout and will appear in your withdrawal history."}
                 </Text>
               </View>
