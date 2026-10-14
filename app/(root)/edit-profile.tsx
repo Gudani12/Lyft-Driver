@@ -164,6 +164,8 @@ const EditProfile = () => {
         );
         const existingData = current?.data?.profile_data ?? {};
         payload = { profile_data: { ...existingData, [field]: value.trim() } };
+      } else if (field === "name") {
+        payload = { full_name: value.trim() };
       } else {
         payload = { [field]: value.trim() };
       }

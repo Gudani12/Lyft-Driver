@@ -123,7 +123,10 @@ export async function GET(request: Request) {
             ...profile,
             rating: Number(driverRating.toFixed(2)),
             vehicle,
-            name: profile.full_name ?? null,
+            name:
+              profile.full_name ||
+              [profile.first_name, profile.last_name].filter(Boolean).join(" ") ||
+              null,
             profile_data: profile.profile_data ?? {},
             driver_verification_status: driverVerificationStatus,
           }
