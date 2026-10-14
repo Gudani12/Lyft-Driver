@@ -55,11 +55,9 @@ describe('driver/earnings API route', () => {
     expect(body.data.payouts).toEqual([]);
   });
 
-  it('reports request withdrawals when the API runs in production', async () => {
+  it('reports simulated withdrawals when the API runs in production', async () => {
     const previousNodeEnv = process.env.NODE_ENV;
-    const previousMockWithdrawalIds = process.env.MOCK_WITHDRAWAL_CLERK_IDS;
     process.env.NODE_ENV = 'production';
-    delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
 
     try {
       const from = jest.fn(() => {
@@ -83,60 +81,12 @@ describe('driver/earnings API route', () => {
       const response = await GET(request);
       const body = await response.json();
 
-      expect(body.data.summary.withdrawal_mode).toBe('request');
-    } finally {
-      if (previousNodeEnv === undefined) {
-        delete process.env.NODE_ENV;
-      } else {
-        process.env.NODE_ENV = previousNodeEnv;
-      }
-      if (previousMockWithdrawalIds === undefined) {
-        delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
-      } else {
-        process.env.MOCK_WITHDRAWAL_CLERK_IDS = previousMockWithdrawalIds;
-      }
-    }
-  });
-
-  it('reports simulations only for allowlisted test users in production', async () => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    const previousMockWithdrawalIds = process.env.MOCK_WITHDRAWAL_CLERK_IDS;
-    process.env.NODE_ENV = 'production';
-    process.env.MOCK_WITHDRAWAL_CLERK_IDS = 'clerk_test, clerk_driver';
-
-    try {
-      const from = jest.fn(() => {
-        const chain: any = {};
-        chain.select = jest.fn().mockReturnValue(chain);
-        chain.eq = jest.fn().mockReturnValue(chain);
-        chain.maybeSingle = jest.fn().mockResolvedValue({
-          data: null,
-          error: null,
-        });
-        return chain;
-      });
-
-      setupSupabase({ from });
-
-      const { GET } = require('../../app/(api)/driver/earnings+api');
-      const request = new Request(
-        'https://example.com/api/driver/earnings?clerkId=clerk_driver',
-        { method: 'GET' },
-      );
-      const response = await GET(request);
-      const body = await response.json();
-
       expect(body.data.summary.withdrawal_mode).toBe('simulation');
     } finally {
       if (previousNodeEnv === undefined) {
         delete process.env.NODE_ENV;
       } else {
         process.env.NODE_ENV = previousNodeEnv;
-      }
-      if (previousMockWithdrawalIds === undefined) {
-        delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
-      } else {
-        process.env.MOCK_WITHDRAWAL_CLERK_IDS = previousMockWithdrawalIds;
       }
     }
   });

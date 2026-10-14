@@ -1,5 +1,4 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
-import { getWithdrawalMode } from "@/lib/withdrawals";
 
 // Balance model:
 //   gross     = fares of completed trips
@@ -18,7 +17,7 @@ export async function GET(request: Request) {
     if (!clerkId) {
       return Response.json({ error: "Missing clerkId" }, { status: 400 });
     }
-    const withdrawalMode = getWithdrawalMode(clerkId);
+    const withdrawalMode = "simulation";
 
     const supabase = await getSupabaseServerClient();
 

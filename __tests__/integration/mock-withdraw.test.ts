@@ -1,6 +1,5 @@
 describe('driver/mock-withdraw API route', () => {
   const originalNodeEnv = process.env.NODE_ENV;
-  const originalMockWithdrawalIds = process.env.MOCK_WITHDRAWAL_CLERK_IDS;
 
   afterEach(() => {
     jest.resetModules();
@@ -10,16 +9,10 @@ describe('driver/mock-withdraw API route', () => {
     } else {
       process.env.NODE_ENV = originalNodeEnv;
     }
-    if (originalMockWithdrawalIds === undefined) {
-      delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
-    } else {
-      process.env.MOCK_WITHDRAWAL_CLERK_IDS = originalMockWithdrawalIds;
-    }
   });
 
-  it('allows an explicitly allowlisted test account to simulate a withdrawal in production', async () => {
+  it('records an authenticated simulation in production', async () => {
     process.env.NODE_ENV = 'production';
-    process.env.MOCK_WITHDRAWAL_CLERK_IDS = 'clerk_driver';
 
     const insert = jest.fn().mockReturnValue({
       select: jest.fn().mockReturnValue({
@@ -80,13 +73,18 @@ describe('driver/mock-withdraw API route', () => {
     expect(body.data.is_mock).toBe(true);
   });
 
-  it('keeps production simulations disabled for accounts outside the allowlist', async () => {
+  it('still authenticates production simulation requests', async () => {
     process.env.NODE_ENV = 'production';
-    delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
 
     const getSupabaseServerClient = jest.fn();
+    const requireClerkUser = jest.fn().mockRejectedValue(
+      new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
     jest.doMock('../../lib/server-auth', () => ({
-      requireClerkUser: jest.fn().mockResolvedValue('clerk_driver'),
+      requireClerkUser,
     }));
     jest.doMock('../../lib/supabase-server', () => ({
       getSupabaseServerClient,
@@ -100,8 +98,9 @@ describe('driver/mock-withdraw API route', () => {
     const response = await POST(request);
     const body = await response.json();
 
-    expect(response.status).toBe(404);
-    expect(body.error).toBe('Mock withdrawals are disabled in production');
+    expect(response.status).toBe(401);
+    expect(body.error).toBe('Authentication required');
+    expect(requireClerkUser).toHaveBeenCalledWith(request);
     expect(getSupabaseServerClient).not.toHaveBeenCalled();
   });
 });
