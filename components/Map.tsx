@@ -21,7 +21,10 @@ if (Platform.OS !== "web") {
 import customMapStyle from "@/constants/mapStyle";
 import { brand, ui } from "@/constants/theme";
 import { fetchAPI } from "@/lib/fetch";
-import { calculateRegion, fetchRouteCoordinates } from "@/lib/map";
+import {
+  calculateRegionForCoordinates,
+  fetchRouteCoordinates,
+} from "@/lib/map";
 import { useLocationStore } from "@/store";
 
 type Hub = {
@@ -51,6 +54,7 @@ export default function Map({
   const { getToken } = useAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
+  const mapRef = useRef<any>(null);
   const { userLatitude, userLongitude, selectedHubId, setHubPickup } = useLocationStore();
   const [hubs, setHubs] = useState<Hub[]>([]);
   const [driverToPickupRoute, setDriverToPickupRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
@@ -157,12 +161,45 @@ export default function Map({
     };
   }, [userLatitude, userLongitude, passengerLatitude, passengerLongitude, dropoffLatitude, dropoffLongitude]);
 
-  const region = calculateRegion({
-    userLatitude,
-    userLongitude,
-    destinationLatitude: dropoffLatitude ?? passengerLatitude ?? null,
-    destinationLongitude: dropoffLongitude ?? passengerLongitude ?? null,
-  });
+  const routeCoordinates: Array<{ latitude: number; longitude: number }> = [];
+  if (userLatitude != null && userLongitude != null) {
+    routeCoordinates.push({ latitude: userLatitude, longitude: userLongitude });
+  }
+  if (passengerLatitude != null && passengerLongitude != null) {
+    routeCoordinates.push({
+      latitude: passengerLatitude,
+      longitude: passengerLongitude,
+    });
+  }
+  if (dropoffLatitude != null && dropoffLongitude != null) {
+    routeCoordinates.push({
+      latitude: dropoffLatitude,
+      longitude: dropoffLongitude,
+    });
+  }
+
+  const region = calculateRegionForCoordinates(routeCoordinates);
+
+  useEffect(() => {
+    if (
+      Platform.OS === "web" ||
+      passengerLatitude == null ||
+      passengerLongitude == null
+    ) {
+      return;
+    }
+
+    mapRef.current?.animateToRegion(region, 700);
+  }, [
+    passengerLatitude,
+    passengerLongitude,
+    dropoffLatitude,
+    dropoffLongitude,
+    region.latitude,
+    region.longitude,
+    region.latitudeDelta,
+    region.longitudeDelta,
+  ]);
 
   if (Platform.OS === "web" || !MapView || !Marker || !Circle || !Polyline) {
     return (
@@ -184,10 +221,11 @@ export default function Map({
 
   return (
     <MapView
+      ref={mapRef}
       provider={PROVIDER_DEFAULT}
       style={{ flex: 1 }}
       initialRegion={region}
-      followsUserLocation
+      followsUserLocation={passengerLatitude == null}
       showsCompass={false}
       showsMyLocationButton={false}
       customMapStyle={customMapStyle}

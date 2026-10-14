@@ -76,6 +76,31 @@ export const calculateRegion = ({
   };
 };
 
+export const calculateRegionForCoordinates = (
+  coordinates: Array<{ latitude: number; longitude: number }>,
+) => {
+  if (coordinates.length === 0) {
+    return calculateRegion({
+      userLatitude: null,
+      userLongitude: null,
+    });
+  }
+
+  const latitudes = coordinates.map(({ latitude }) => latitude);
+  const longitudes = coordinates.map(({ longitude }) => longitude);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max((maxLat - minLat) * 1.4, 0.02),
+    longitudeDelta: Math.max((maxLng - minLng) * 1.4, 0.02),
+  };
+};
+
 export const getRideMapLocation = (ride: Record<string, unknown>) => {
   const readCoordinate = (
     value: unknown,
@@ -170,6 +195,67 @@ export const decodePolyline = (encoded: string): Array<{ latitude: number; longi
   return points;
 };
 
+const getPublicRoadRoute = async ({
+  originLatitude,
+  originLongitude,
+  destinationLatitude,
+  destinationLongitude,
+}: {
+  originLatitude: number;
+  originLongitude: number;
+  destinationLatitude: number;
+  destinationLongitude: number;
+}) => {
+  const coordinates =
+    `${originLongitude},${originLatitude};${destinationLongitude},${destinationLatitude}`;
+  const providers = [
+    "https://router.project-osrm.org",
+    "https://routing.openstreetmap.de/routed-car",
+  ];
+  let lastError: unknown;
+
+  for (const provider of providers) {
+    try {
+      const url = new URL(`${provider}/route/v1/driving/${coordinates}`);
+      url.searchParams.set("overview", "full");
+      url.searchParams.set("geometries", "geojson");
+      const response = await fetch(url.toString());
+      if (!response.ok) continue;
+
+      const body = await response.json();
+      const routeCoordinates = body?.routes?.[0]?.geometry?.coordinates;
+      if (body?.code !== "Ok" || !Array.isArray(routeCoordinates)) continue;
+
+      const route = routeCoordinates
+        .filter(
+          (coordinate: unknown) =>
+            Array.isArray(coordinate) &&
+            coordinate.length >= 2 &&
+            Number.isFinite(coordinate[0]) &&
+            Number.isFinite(coordinate[1]) &&
+            coordinate[0] >= -180 &&
+            coordinate[0] <= 180 &&
+            coordinate[1] >= -90 &&
+            coordinate[1] <= 90,
+        )
+        .map(([longitude, latitude]: [number, number]) => ({
+          latitude,
+          longitude,
+        }));
+
+      if (route.length > 1) return route;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    console.warn("Public road-routing fallback failed", lastError);
+  }
+
+  return [];
+};
+
 export const fetchRouteCoordinates = async ({
   originLatitude,
   originLongitude,
@@ -212,8 +298,17 @@ export const fetchRouteCoordinates = async ({
     if (
       error instanceof Error &&
       (error.message === "Route lookup is temporarily unavailable." ||
-        error.message === "No driving route was found.")
+        error.message === "No driving route was found." ||
+        error.message === "Network request failed" ||
+        error.message === "Failed to fetch")
     ) {
+      const fallbackRoute = await getPublicRoadRoute({
+        originLatitude,
+        originLongitude,
+        destinationLatitude,
+        destinationLongitude,
+      });
+      if (fallbackRoute.length > 1) return fallbackRoute;
       return [];
     }
 
