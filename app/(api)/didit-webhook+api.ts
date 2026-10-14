@@ -1,10 +1,42 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import crypto from "node:crypto";
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Workflow IDs
+// ─────────────────────────────────────────────────────────────────────────────
 const KYC_WORKFLOW_ID = "57368fe7-f4dc-487f-bebe-981305685d81";
-const DOCUMENT_AI_WORKFLOW_ID = "ec45a42e-4881-48cc-9f43-37ac551970f2";
 
+// Document AI workflows (one per document kind)
+const DOCUMENT_AI_WORKFLOW_IDS: Record<string, string> = {
+  pdp: "REPLACE_WITH_PDP_WORKFLOW_ID",
+  police_clearance: "REPLACE_WITH_POLICE_CLEARANCE_WORKFLOW_ID",
+  vehicle_registration: "REPLACE_WITH_VEHICLE_REGISTRATION_WORKFLOW_ID",
+  operating_card: "REPLACE_WITH_OPERATING_CARD_WORKFLOW_ID",
+  operating_licence: "REPLACE_WITH_OPERATING_LICENCE_WORKFLOW_ID",
+  roadworthy: "REPLACE_WITH_ROADWORTHY_WORKFLOW_ID",
+  insurance: "REPLACE_WITH_INSURANCE_WORKFLOW_ID",
+};
+
+// Reverse map: workflow ID → doc kind
+const WORKFLOW_ID_TO_DOC_KIND: Record<string, string> = Object.fromEntries(
+  Object.entries(DOCUMENT_AI_WORKFLOW_IDS).map(([kind, id]) => [id, kind]),
+);
+
+// Required number of extracted fields per doc kind.
+// If Didit returns fewer fields than this, we refuse to mark the doc verified.
+const MIN_FIELD_COUNT: Record<string, number> = {
+  pdp: 3,
+  police_clearance: 3,
+  vehicle_registration: 3,
+  operating_card: 2,
+  operating_licence: 2,
+  roadworthy: 2,
+  insurance: 3,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HMAC canonicalisation helpers
+// ─────────────────────────────────────────────────────────────────────────────
 function shortenFloats(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(shortenFloats);
   if (v && typeof v === "object") {
@@ -33,49 +65,9 @@ function sortKeys(v: unknown): unknown {
   return v;
 }
 
-// Identify which doc kind the extracted fields belong to.
-// Didit groups multiple docs into a single Document AI step, so we
-// classify based on unique field keys.
-function classifyExtractedFields(fields: Record<string, any>): string | null {
-  if (!fields || typeof fields !== "object") return null;
-
-  // PrDP — has pdp_category or permit_number
-  if ("pdp_category" in fields || "permit_number" in fields) return "pdp";
-
-  // Roadworthy — has test_date
-  if ("test_date" in fields) return "roadworthy";
-
-  // Operating Card — has card_number
-  if ("card_number" in fields) return "operating_card";
-
-  // Operating Licence — has licence_number
-  if ("licence_number" in fields) return "operating_licence";
-
-  // Insurance — has policy_number or insurer
-  if ("policy_number" in fields || "insurer" in fields) return "insurance";
-
-  // Police Clearance — has issue_date + certificate_number + full_name
-  if (
-    "issue_date" in fields &&
-    "certificate_number" in fields &&
-    "full_name" in fields
-  ) {
-    return "police_clearance";
-  }
-
-  // Vehicle Licence Disc — has plate + vin + expiry_date
-  if ("plate" in fields && "vin" in fields && "expiry_date" in fields) {
-    return "vehicle_registration";
-  }
-
-  // Vehicle Photo — just plate
-  if ("plate" in fields && Object.keys(fields).length === 1) {
-    return "vehicle_photo";
-  }
-
-  return null;
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Webhook entry point
+// ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request: Request) {
   try {
     const raw = await request.text();
@@ -112,9 +104,10 @@ export async function POST(request: Request) {
     const status: string | undefined = parsed.status;
     const decision = parsed.decision ?? {};
     const workflowId: string | undefined = parsed.workflow_id;
+    const metadata = parsed.metadata ?? {};
 
     console.log(
-      `didit-webhook: session=${parsed.session_id} status=${status} workflow=${workflowId} vendor=${clerkId}`,
+      `didit-webhook: session=${parsed.session_id} status=${status} workflow=${workflowId} vendor=${clerkId} metadata=${JSON.stringify(metadata)}`,
     );
 
     if (!clerkId) {
@@ -123,12 +116,10 @@ export async function POST(request: Request) {
 
     const supabase = await getSupabaseServerClient();
 
-    // Route by workflow
+    // Route based on workflow
+    const isKyc = workflowId === KYC_WORKFLOW_ID;
     const isDocumentAI =
-      workflowId === DOCUMENT_AI_WORKFLOW_ID ||
-      // Fallback: if no workflow_id is present, look at the decision shape
-      (!workflowId &&
-        (decision.document_ai_results || decision.extracted_fields));
+      workflowId && workflowId in WORKFLOW_ID_TO_DOC_KIND;
 
     if (isDocumentAI) {
       await handleDocumentAIWebhook({
@@ -136,14 +127,18 @@ export async function POST(request: Request) {
         clerkId,
         status,
         decision,
+        workflowId: workflowId!,
+        metadata,
       });
-    } else {
+    } else if (isKyc) {
       await handleKYCWebhook({
         supabase,
         clerkId,
         status,
         decision,
       });
+    } else {
+      console.warn(`didit-webhook: unknown workflow ${workflowId}`);
     }
 
     return new Response("ok");
@@ -154,9 +149,8 @@ export async function POST(request: Request) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KYC workflow handler (ID + Licence)
+// KYC handler (ID + Licence)
 // ─────────────────────────────────────────────────────────────────────────────
-
 async function handleKYCWebhook({
   supabase,
   clerkId,
@@ -170,12 +164,6 @@ async function handleKYCWebhook({
 }) {
   const idVerifications = Array.isArray(decision.id_verifications)
     ? decision.id_verifications
-    : [];
-  const livenessChecks = Array.isArray(decision.liveness_checks)
-    ? decision.liveness_checks
-    : [];
-  const faceMatches = Array.isArray(decision.face_matches)
-    ? decision.face_matches
     : [];
 
   const idApproved = idVerifications.some((v: any) => v?.status === "Approved");
@@ -194,10 +182,10 @@ async function handleKYCWebhook({
         if (firstId.document_number) update.id_number = firstId.document_number;
         if (firstId.first_name) update.first_name = firstId.first_name;
         if (firstId.last_name) update.last_name = firstId.last_name;
-        if (firstId.date_of_birth)
-          update.date_of_birth = firstId.date_of_birth;
+        if (firstId.date_of_birth) update.date_of_birth = firstId.date_of_birth;
       }
 
+      // Recompute overall driver status
       const { data: current } = await supabase
         .from("drivers")
         .select("licence_verified, profile_data")
@@ -222,11 +210,7 @@ async function handleKYCWebhook({
         (k) => docs?.[k]?.status === "verified",
       );
 
-      if (
-        current?.licence_verified === true &&
-        idApproved &&
-        allRequired
-      ) {
+      if (current?.licence_verified === true && idApproved && allRequired) {
         update.driver_verification_status = "approved";
         update.verified = true;
       }
@@ -236,8 +220,7 @@ async function handleKYCWebhook({
     case "Declined": {
       update.driver_verification_status = "rejected";
       update.driver_rejection_reason =
-        decision?.reviews?.[0]?.comment ??
-        "Identity verification was declined.";
+        decision?.reviews?.[0]?.comment ?? "Identity verification was declined.";
       break;
     }
 
@@ -267,22 +250,36 @@ async function handleKYCWebhook({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Document AI workflow handler
+// Document AI handler
 // ─────────────────────────────────────────────────────────────────────────────
-
 async function handleDocumentAIWebhook({
   supabase,
   clerkId,
   status,
   decision,
+  workflowId,
+  metadata,
 }: {
   supabase: any;
   clerkId: string;
   status: string | undefined;
   decision: any;
+  workflowId: string;
+  metadata: any;
 }) {
-  // Didit may return document AI results in a few possible shapes.
-  // Try the most common ones.
+  // Determine doc kind from metadata OR workflow id
+  const docKind: string | undefined =
+    (typeof metadata?.docKind === "string" ? metadata.docKind : undefined) ??
+    WORKFLOW_ID_TO_DOC_KIND[workflowId];
+
+  if (!docKind) {
+    console.error(
+      `didit-webhook (DocumentAI): could not determine docKind for workflow ${workflowId}`,
+    );
+    return;
+  }
+
+  // ── Extract fields from whatever shape Didit sent ─────────────────────
   const documentAiResults =
     decision?.document_ai_results ??
     decision?.document_ai ??
@@ -293,14 +290,8 @@ async function handleDocumentAIWebhook({
     ? documentAiResults
     : [documentAiResults];
 
-  const extractedFields = decision?.extracted_fields ?? decision?.fields ?? null;
-
-  console.log(
-    `didit-webhook (DocumentAI): received ${rawResults.length} result(s), status=${status}`,
-  );
-
-  // Flatten every extracted-fields bag we can find
-  const bags: { fields: Record<string, any>; nodeId?: string }[] = [];
+  // Find the first non-empty fields bag
+  let extractedFields: Record<string, any> | null = null;
 
   for (const result of rawResults) {
     if (!result || typeof result !== "object") continue;
@@ -310,44 +301,56 @@ async function handleDocumentAIWebhook({
       result.data ??
       result.extracted_data ??
       null;
-    if (fields && typeof fields === "object") {
-      bags.push({ fields, nodeId: result.node_id ?? result.step_id });
+    if (fields && typeof fields === "object" && Object.keys(fields).length > 0) {
+      extractedFields = fields;
+      break;
     }
   }
 
-  if (extractedFields && typeof extractedFields === "object") {
-    bags.push({ fields: extractedFields });
+  // Fallback: check the top-level decision for a flat fields object
+  if (!extractedFields) {
+    const topLevel =
+      decision?.extracted_fields ?? decision?.fields ?? null;
+    if (topLevel && typeof topLevel === "object") {
+      extractedFields = topLevel;
+    }
   }
 
-  // If nothing useful found, treat the whole decision as fields
-  if (bags.length === 0) {
-    bags.push({ fields: decision });
+  // If still nothing, treat the whole decision as fields for debug purposes
+  if (!extractedFields) {
+    extractedFields = {};
   }
 
-  // Build document entries keyed by docKind
-  const updates: Record<string, any> = {};
+  const fieldCount = Object.keys(extractedFields).length;
+  const minRequired = MIN_FIELD_COUNT[docKind] ?? 2;
 
-  for (const bag of bags) {
-    const fields = bag.fields;
-    const kind = classifyExtractedFields(fields);
-    if (!kind) continue;
+  console.log(
+    `didit-webhook (DocumentAI): docKind=${docKind} status=${status} fieldCount=${fieldCount} minRequired=${minRequired}`,
+  );
 
-    updates[kind] = {
-      status:
-        status === "Approved"
-          ? "verified"
-          : status === "Declined"
-            ? "failed"
-            : "pending_review",
-      extracted_data: fields,
-      verified_at: new Date().toISOString(),
-      verification_method: "Didit Document AI",
-      confidence_score: 0.9,
-      failure_reason: status === "Declined" ? "Didit declined the document." : null,
-    };
+  // ── Decide the status ──────────────────────────────────────────────────
+  // Only mark verified if:
+  //  - Didit returned Approved
+  //  - We got at least the minimum number of fields for this document
+  let docStatus: string;
+  let failureReason: string | null = null;
+
+  if (status === "Approved" && fieldCount >= minRequired) {
+    docStatus = "verified";
+  } else if (status === "Declined") {
+    docStatus = "failed";
+    failureReason =
+      decision?.reviews?.[0]?.comment ?? "Didit declined the document.";
+  } else if (status === "Approved" && fieldCount < minRequired) {
+    // Didit said Approved but it extracted almost nothing —
+    // likely the wrong image. Treat as failed.
+    docStatus = "failed";
+    failureReason = `Could not read the required fields from the uploaded image. Please upload a clear photo of your ${docKind.replace(/_/g, " ")}.`;
+  } else {
+    docStatus = "pending_review";
   }
 
-  // Fetch current driver row
+  // ── Persist ────────────────────────────────────────────────────────────
   const { data: driver, error: lookupError } = await supabase
     .from("drivers")
     .select(
@@ -357,10 +360,7 @@ async function handleDocumentAIWebhook({
     .maybeSingle();
 
   if (lookupError || !driver) {
-    console.error(
-      "didit-webhook (DocumentAI): driver not found",
-      lookupError,
-    );
+    console.error("didit-webhook (DocumentAI): driver not found", lookupError);
     return;
   }
 
@@ -375,16 +375,19 @@ async function handleDocumentAIWebhook({
       ? (profileData.driver_documents as Record<string, any>)
       : {};
 
-  const newDocs = { ...existingDocs };
+  const newDocs = {
+    ...existingDocs,
+    [docKind]: {
+      ...(existingDocs[docKind] ?? {}),
+      status: docStatus,
+      extracted_data: extractedFields,
+      verified_at: new Date().toISOString(),
+      verification_method: "Didit Document AI",
+      failure_reason: failureReason,
+    },
+  };
 
-  for (const [kind, update] of Object.entries(updates)) {
-    newDocs[kind] = {
-      ...(existingDocs[kind] ?? {}),
-      ...update,
-    };
-  }
-
-  // Recompute overall status
+  // Recompute overall driver verification status
   const REQUIRED = [
     "pdp",
     "police_clearance",
@@ -430,9 +433,6 @@ async function handleDocumentAIWebhook({
     .eq("clerk_id", clerkId);
 
   if (updateError) {
-    console.error(
-      "didit-webhook (DocumentAI): DB update failed",
-      updateError,
-    );
+    console.error("didit-webhook (DocumentAI): DB update failed", updateError);
   }
 }

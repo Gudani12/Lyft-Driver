@@ -1,8 +1,23 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 
-// Per-session config, NOT a secret, NOT an env var.
-// From Didit Console → Workflows → "DOCUMENT AI".
-const DOCUMENT_AI_WORKFLOW_ID = "ec45a42e-4881-48cc-9f43-37ac551970f2";
+// ─────────────────────────────────────────────────────────────────────────────
+// One workflow per document type.
+// Create these in Didit Console → Workflows → New workflow.
+// Each workflow should contain ONE Document AI step with only the fields
+// for that specific document type.
+//
+// REPLACE every placeholder below with the actual workflow IDs
+// from the Didit Console.
+// ─────────────────────────────────────────────────────────────────────────────
+const WORKFLOW_IDS: Record<string, string> = {
+    pdp: "REPLACE_WITH_PDP_WORKFLOW_ID",
+    police_clearance: "REPLACE_WITH_POLICE_CLEARANCE_WORKFLOW_ID",
+    vehicle_registration: "REPLACE_WITH_VEHICLE_REGISTRATION_WORKFLOW_ID",
+    operating_card: "REPLACE_WITH_OPERATING_CARD_WORKFLOW_ID",
+    operating_licence: "REPLACE_WITH_OPERATING_LICENCE_WORKFLOW_ID",
+    roadworthy: "REPLACE_WITH_ROADWORTHY_WORKFLOW_ID",
+    insurance: "REPLACE_WITH_INSURANCE_WORKFLOW_ID",
+};
 
 interface StartPayload {
     clerkId: string;
@@ -25,6 +40,20 @@ export async function POST(request: Request) {
             );
         }
 
+        const workflowId = WORKFLOW_IDS[docKind];
+        if (!workflowId || workflowId.startsWith("REPLACE_WITH")) {
+            console.error(
+                `document-ai-session: no workflow configured for docKind=${docKind}`,
+            );
+            return Response.json(
+                {
+                    error: "workflow_not_configured",
+                    message: `No Document AI workflow configured for document type: ${docKind}`,
+                },
+                { status: 400 },
+            );
+        }
+
         const apiKey = process.env.DIDIT_API_KEY;
         if (!apiKey) {
             console.error("document-ai-session: DIDIT_API_KEY is missing");
@@ -38,7 +67,7 @@ export async function POST(request: Request) {
         }
 
         const payload: Record<string, unknown> = {
-            workflow_id: DOCUMENT_AI_WORKFLOW_ID,
+            workflow_id: workflowId,
             vendor_data: clerkId,
             metadata: { docKind },
         };
@@ -48,7 +77,7 @@ export async function POST(request: Request) {
         }
 
         console.log(
-            `document-ai-session: creating session for ${clerkId} docKind=${docKind}`,
+            `document-ai-session: creating session for ${clerkId} docKind=${docKind} workflow=${workflowId}`,
         );
 
         const res = await fetch("https://verification.didit.me/v3/session/", {
@@ -84,7 +113,7 @@ export async function POST(request: Request) {
             );
         }
 
-        // Record session id on the driver for webhook correlation
+        // Record session id on the driver so the webhook can look up docKind later
         const supabase = await getSupabaseServerClient();
         const { data: driver } = await supabase
             .from("drivers")
