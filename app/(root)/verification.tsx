@@ -1,7 +1,7 @@
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,15 +19,15 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import CustomButton from "@/components/CustomButton";
-import { brand, ui } from "@/constants/theme";
+import { ui } from "@/constants/theme";
 import { fetchAPI } from "@/lib/fetch";
 import {
   AutomatedDocStatus,
   DOC_LABELS,
   DiditDocType,
   DocKind,
-  EXPIRING_DOCS,
   PickedImage,
+  REQUIRED_DRIVER_DOCUMENTS,
   VerificationStatus,
   captureImage,
   getSignedUrl,
@@ -60,8 +60,6 @@ const SECTIONS: { title: string; note: string; docs: DocKind[] }[] = [
     docs: ["vehicle_registration", "roadworthy", "insurance", "vehicle_photo"],
   },
 ];
-
-const REQUIRED: DocKind[] = ["pdp", "vehicle_registration", "insurance"];
 
 const STATUS_BANNER: Record<
   VerificationStatus,
@@ -163,10 +161,9 @@ const DriverVerification = () => {
   const [activeDocForAction, setActiveDocForAction] = useState<DocKind | null>(null);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
 
-  const [driverProfile, setDriverProfile] = useState<any>(null);
+  const userId = user?.id;
 
   // Didit & Registry state
-  const [diditBusy, setDiditBusy] = useState<DiditDocType | null>(null);
   const [diditDone, setDiditDone] = useState<Record<DiditDocType, boolean>>({
     id: false,
     passport: false,
@@ -198,18 +195,16 @@ const DriverVerification = () => {
   const [saIdError, setSaIdError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!user?.id) {
+    if (!userId) {
       setLoading(false);
       return;
     }
 
     try {
       const result = await fetchAPI(
-        `/(api)/profile?clerkId=${encodeURIComponent(user.id)}`,
+        `/(api)/profile?clerkId=${encodeURIComponent(userId)}`,
       );
       const record = result?.data ?? {};
-      setDriverProfile(record);
-
       setStatus(
         (record.driver_verification_status as VerificationStatus) ??
           "not_submitted",
@@ -279,7 +274,7 @@ const DriverVerification = () => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -290,8 +285,12 @@ const DriverVerification = () => {
   // Progress metrics calculation
   const identityDone = diditDone.id || diditDone.passport ? 1 : 0;
   const licenceDone = diditDone.licence ? 1 : 0;
-  const docsDone = REQUIRED.filter((kind) => Boolean(savedDocs[kind]?.path || picked[kind])).length;
-  const totalItems = 2 + REQUIRED.length;
+  const docsDone = REQUIRED_DRIVER_DOCUMENTS.filter(
+    (kind) =>
+      Boolean(savedDocs[kind]?.path) &&
+      savedDocs[kind]?.status === "verified",
+  ).length;
+  const totalItems = 2 + REQUIRED_DRIVER_DOCUMENTS.length;
   const totalDone = identityDone + licenceDone + docsDone;
   const progress = Math.min(100, Math.round((totalDone / totalItems) * 100));
 
@@ -394,7 +393,7 @@ const DriverVerification = () => {
         } else {
           Alert.alert("Document", "Could not generate secure view link for this document.");
         }
-      } catch (err) {
+      } catch {
         Alert.alert("Document", "Could not load document preview.");
       }
     }
@@ -408,7 +407,6 @@ const DriverVerification = () => {
       return;
     }
 
-    setDiditBusy(docType);
     try {
       const session = await startDiditVerification(user.id, docType);
       router.push({
@@ -422,8 +420,6 @@ const DriverVerification = () => {
       });
     } catch (err: any) {
       Alert.alert("Verification", err?.message ?? "Please try again.");
-    } finally {
-      setDiditBusy(null);
     }
   };
 
@@ -614,7 +610,7 @@ const DriverVerification = () => {
                 <Text className="text-[15px] font-JakartaBold text-[#21152F]">
                   {label.title}
                 </Text>
-                {REQUIRED.includes(kind) && (
+                {REQUIRED_DRIVER_DOCUMENTS.includes(kind) && (
                   <View className="rounded-md bg-[#FEF3F3] px-1.5 py-0.5">
                     <Text className="text-[9.5px] font-JakartaBold text-[#B02A2A]">
                       Required
@@ -780,7 +776,7 @@ const DriverVerification = () => {
                   Compliance Completion
                 </Text>
                 <Text className="mt-0.5 text-[12px] font-Jakarta text-[#746A7E]">
-                  {totalDone} of {totalItems} legal requirements met
+                  {totalDone} of {totalItems} legal requirements verified
                 </Text>
               </View>
               <Text className="text-[20px] font-JakartaExtraBold text-[#5A189A]">

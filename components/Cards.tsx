@@ -1,8 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, Text, View } from "react-native";
 
-import { brand, ui } from "@/constants/theme";
-
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
 type SectionCardProps = {
@@ -61,8 +59,7 @@ export const SectionCard = ({
           </Text>
           {!!value && (
             <Text
-              className="mt-0.5 text-[12px] font-Jakarta text-[#746A7E]"
-              numberOfLines={1}
+              className="mt-0.5 text-[12px] font-Jakarta leading-[18px] text-[#746A7E]"
             >
               {value}
             </Text>

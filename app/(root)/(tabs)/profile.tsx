@@ -1,7 +1,7 @@
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,21 +11,19 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SectionCard, StatCard } from "@/components/Cards";
-import { brand, ui } from "@/constants/theme";
+import { SectionCard } from "@/components/Cards";
 import { fetchAPI } from "@/lib/fetch";
 import {
   AutomatedDocStatus,
   DOC_LABELS,
   DocKind,
-  PickedImage,
+  REQUIRED_DRIVER_DOCUMENTS,
   captureImage,
   getSignedUrl,
   pickFromLibrary,
@@ -37,6 +35,71 @@ import {
 const SUPPORT_EMAIL = "drivers@lyftcarpool.co.za";
 const SUPPORT_WHATSAPP = "27110000000";
 
+type IoniconName = keyof typeof Ionicons.glyphMap;
+type ProfileDocStatus = AutomatedDocStatus | "unverified";
+
+type SavedDocument = {
+  path?: string;
+  status?: AutomatedDocStatus;
+  expires_on?: string | null;
+  failure_reason?: string | null;
+};
+
+type DriverVehicle = {
+  make?: string | null;
+  model?: string | null;
+  year?: string | number | null;
+  colour?: string | null;
+  plate?: string | null;
+  seats?: number | null;
+};
+
+type DriverProfileData = {
+  driver_documents?: Partial<Record<DocKind, SavedDocument>>;
+  vehicle_photo_url?: string | null;
+  vehicle?: DriverVehicle | null;
+  amenities?: Record<string, boolean>;
+  bank?: { account_number?: string | null };
+  emergency_contact?: string | null;
+  [key: string]: unknown;
+};
+
+type DriverProfile = {
+  name?: string | null;
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  profile_image_url?: string | null;
+  rating?: number | null;
+  total_trips?: number | null;
+  car_seats?: number | null;
+  verified?: boolean | null;
+  driver_verification_status?: string | null;
+  driver_rejection_reason?: string | null;
+  id_verified?: boolean | null;
+  passport_verified?: boolean | null;
+  licence_verified?: boolean | null;
+  id_number?: string | null;
+  passport_number?: string | null;
+  date_of_birth?: string | null;
+  profile_data?: DriverProfileData;
+  vehicle?: DriverVehicle | null;
+};
+
+const DOCUMENT_ICONS: Record<DocKind, IoniconName> = {
+  id_front: "card-outline",
+  id_back: "card-outline",
+  selfie: "person-circle-outline",
+  licence: "car-outline",
+  pdp: "ribbon-outline",
+  vehicle_registration: "disc-outline",
+  roadworthy: "construct-outline",
+  insurance: "shield-outline",
+  vehicle_photo: "image-outline",
+};
+
 // Driver amenities
 const AMENITY_ITEMS = [
   { key: "ac", label: "Air Conditioning", icon: "snow-outline" },
@@ -47,71 +110,216 @@ const AMENITY_ITEMS = [
 ];
 
 const STATUS_PILL_CONFIG: Record<
-  AutomatedDocStatus | "unverified",
-  { bg: string; text: string; icon: any; label: string }
+  ProfileDocStatus,
+  { bg: string; text: string; color: string; icon: IoniconName; label: string }
 > = {
   verified: {
     bg: "bg-[#F0E6FA]",
     text: "text-[#5A189A]",
+    color: "#5A189A",
     icon: "checkmark-circle",
-    label: "Verified",
+    label: "Approved",
   },
   pending_review: {
     bg: "bg-[#FFF6E5]",
     text: "text-[#D99A1B]",
+    color: "#D99A1B",
     icon: "time-outline",
-    label: "In Review",
+    label: "Pending Review",
   },
   expired: {
     bg: "bg-[#FEF3F3]",
     text: "text-[#B02A2A]",
+    color: "#B02A2A",
     icon: "alert-circle",
     label: "Expired",
   },
   mismatch: {
     bg: "bg-[#FFF1F2]",
     text: "text-[#E11D48]",
+    color: "#E11D48",
     icon: "warning-outline",
-    label: "Mismatch",
+    label: "Rejected",
   },
   failed: {
     bg: "bg-[#FEF3F3]",
     text: "text-[#B02A2A]",
+    color: "#B02A2A",
     icon: "close-circle",
-    label: "Failed",
+    label: "Rejected",
   },
   unverified: {
     bg: "bg-[#F7F4FB]",
     text: "text-[#746A7E]",
+    color: "#746A7E",
     icon: "add-circle-outline",
     label: "Upload Required",
   },
 };
 
+function getDocumentStatus(docEntry?: SavedDocument): ProfileDocStatus {
+  if (!docEntry?.path) return "unverified";
+  return docEntry.status && docEntry.status in STATUS_PILL_CONFIG
+    ? docEntry.status
+    : "pending_review";
+}
+
+function ProfileMetricCard({
+  icon,
+  value,
+  label,
+}: {
+  icon: IoniconName;
+  value: string;
+  label: string;
+}) {
+  return (
+    <View className="min-w-0 flex-1 rounded-2xl border border-[#E9E2F0] bg-white px-3 py-3.5">
+      <View className="h-9 w-9 items-center justify-center rounded-xl bg-[#F0E6FA]">
+        <Ionicons name={icon} size={17} color="#5A189A" />
+      </View>
+      <Text className="mt-2.5 text-[19px] font-JakartaExtraBold text-[#21152F]">
+        {value}
+      </Text>
+      <Text className="mt-0.5 text-[11px] font-JakartaMedium leading-4 text-[#746A7E]">
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function ProfileDocRow({
+  kind,
+  docEntry,
+  isBusy,
+  onManage,
+}: {
+  kind: DocKind;
+  docEntry?: SavedDocument;
+  isBusy: boolean;
+  onManage: () => void;
+}) {
+  const hasDocument = Boolean(docEntry?.path);
+  const status: ProfileDocStatus = hasDocument
+    ? docEntry?.status ?? "pending_review"
+    : "unverified";
+  const pill = STATUS_PILL_CONFIG[status];
+  const required = REQUIRED_DRIVER_DOCUMENTS.includes(kind);
+  const label = DOC_LABELS[kind];
+
+  return (
+    <View className="mb-3 overflow-hidden rounded-2xl border border-[#E9E2F0] bg-white p-4 shadow-sm">
+      <View className="flex-row items-start">
+        <View
+          className={`mr-3 h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            hasDocument ? "bg-[#F0E6FA]" : "bg-[#F7F4FB]"
+          }`}
+        >
+          <Ionicons name={DOCUMENT_ICONS[kind]} size={20} color={hasDocument ? "#5A189A" : "#746A7E"} />
+        </View>
+        <View className="min-w-0 flex-1">
+          <Text className="text-[14px] font-JakartaBold leading-5 text-[#21152F]">
+            {label.title}
+            {!required ? " (optional)" : ""}
+          </Text>
+          <View className={`mt-1 self-start flex-row items-center gap-1 rounded-full px-2 py-1 ${pill.bg}`}>
+            <Ionicons name={pill.icon} size={12} color={pill.color} />
+            <Text className={`text-[10px] font-JakartaBold ${pill.text}`}>
+              {pill.label}
+            </Text>
+          </View>
+          <Text className="mt-1 text-[12px] font-Jakarta leading-[18px] text-[#746A7E]">
+            {label.help}
+          </Text>
+        </View>
+      </View>
+
+      {docEntry?.expires_on ? (
+        <Text className="mt-2 text-[11.5px] font-JakartaMedium text-[#746A7E]">
+          Expires: {docEntry.expires_on}
+        </Text>
+      ) : null}
+      {docEntry?.failure_reason ? (
+        <Text className="mt-2 rounded-xl bg-[#FEF3F3] px-3 py-2 text-[12px] font-JakartaMedium leading-[18px] text-[#B02A2A]">
+          {docEntry.failure_reason}
+        </Text>
+      ) : null}
+
+      <View className="mt-3 flex-row items-center justify-between gap-2 border-t border-[#F0E6FA] pt-3">
+        <Text className="min-w-0 flex-1 text-[11px] font-Jakarta text-[#746A7E]">
+          {hasDocument ? "Document on file" : required ? "Required for approval" : "Optional document"}
+        </Text>
+        <TouchableOpacity
+          onPress={onManage}
+          disabled={isBusy}
+          accessibilityRole="button"
+          className="min-h-10 shrink-0 flex-row items-center justify-center gap-1.5 rounded-xl bg-[#5A189A] px-3.5 py-2 active:opacity-70"
+        >
+          {isBusy ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name={hasDocument ? "create-outline" : "cloud-upload-outline"} size={15} color="#FFFFFF" />
+              <Text className="text-[11.5px] font-JakartaBold text-white">
+                {hasDocument ? "Manage document" : "Upload document"}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function VerificationChecklistRow({
+  title,
+  status,
+}: {
+  title: string;
+  status: ProfileDocStatus;
+}) {
+  const pill = STATUS_PILL_CONFIG[status];
+
+  return (
+    <View className="flex-row items-center justify-between gap-2 border-b border-[#F0E6FA] py-3 last:border-b-0">
+      <Text className="min-w-0 flex-1 text-[13px] font-JakartaSemiBold leading-5 text-[#21152F]">
+        {title}
+      </Text>
+      <View className={`shrink-0 flex-row items-center gap-1 rounded-full px-2.5 py-1 ${pill.bg}`}>
+        <Ionicons name={pill.icon} size={12} color={pill.color} />
+        <Text className={`text-[10.5px] font-JakartaBold ${pill.text}`}>
+          {pill.label}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 const Profile = () => {
   const { user } = useUser();
   const { getToken, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
 
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<DriverProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingPhoto, setSavingPhoto] = useState(false);
   const [savingDocKind, setSavingDocKind] = useState<string | null>(null);
-  const [togglingOnline, setTogglingOnline] = useState(false);
 
   // Modals & Sheets
   const [activePhotoType, setActivePhotoType] = useState<"avatar" | "vehicle" | null>(null);
   const [activeDocKind, setActiveDocKind] = useState<DocKind | null>(null);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  const userId = user?.id;
 
   const load = useCallback(async () => {
-    if (!user?.id) {
+    if (!userId) {
       setLoading(false);
       return;
     }
     try {
       const result = await fetchAPI(
-        `/(api)/profile?clerkId=${encodeURIComponent(user.id)}`,
+        `/(api)/profile?clerkId=${encodeURIComponent(userId)}`,
       );
       setProfile(result?.data ?? null);
     } catch (error) {
@@ -120,7 +328,7 @@ const Profile = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -136,8 +344,7 @@ const Profile = () => {
   // Derived records
   const vehicle = profile?.vehicle ?? {};
   const driverStatus = profile?.driver_verification_status ?? "not_submitted";
-  const approved = driverStatus === "approved" || profile?.verified === true;
-  const isOnline = Boolean(profile?.is_online);
+  const approved = driverStatus === "approved";
 
   // Documents uploaded
   const savedDocs = profile?.profile_data?.driver_documents ?? {};
@@ -156,37 +363,55 @@ const Profile = () => {
       pets: false,
     };
 
-  // Toggle Driver Availability
-  const handleToggleOnline = async () => {
-    if (!user?.id) return;
-
-    if (!approved && !isOnline) {
-      Alert.alert(
-        "Verification Required",
-        "Your driver documents must be approved before you can go online to accept ride requests.",
-        [
-          { text: "View Verification", onPress: () => router.push("/(root)/verification") },
-          { text: "Dismiss", style: "cancel" },
-        ],
-      );
-      return;
-    }
-
-    const nextState = !isOnline;
-    setTogglingOnline(true);
-    try {
-      await fetchAPI("/(api)/profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clerkId: user.id, is_online: nextState }),
-      });
-      setProfile((prev: any) => (prev ? { ...prev, is_online: nextState } : prev));
-    } catch (error: any) {
-      Alert.alert("Status error", error?.message ?? "Could not update online status.");
-    } finally {
-      setTogglingOnline(false);
-    }
-  };
+  const identityVerified =
+    profile?.id_verified === true || profile?.passport_verified === true;
+  const licenceVerified = profile?.licence_verified === true;
+  const verificationItems = [
+    {
+      title: "Identity document (ID or passport)",
+      status: identityVerified ? "verified" : "unverified",
+    },
+    {
+      title: "Driving licence (NATIS)",
+      status: licenceVerified ? "verified" : "unverified",
+    },
+    ...REQUIRED_DRIVER_DOCUMENTS.map((kind) => ({
+      title: DOC_LABELS[kind].title,
+      status: getDocumentStatus(savedDocs[kind]),
+    })),
+  ] satisfies { title: string; status: ProfileDocStatus }[];
+  const verifiedRequirements = verificationItems.filter(
+    (item) => item.status === "verified",
+  ).length;
+  const verificationProgress = Math.round(
+    (verifiedRequirements / verificationItems.length) * 100,
+  );
+  const displayName =
+    profile?.name?.trim() ||
+    profile?.full_name?.trim() ||
+    [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") ||
+    user?.fullName?.trim() ||
+    "Name not added";
+  const phoneNumber =
+    profile?.phone_number?.trim() ||
+    user?.primaryPhoneNumber?.phoneNumber ||
+    "No phone added";
+  const emailAddress =
+    profile?.email?.trim() ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "No email added";
+  const ratingValue =
+    typeof profile?.rating === "number" && Number.isFinite(profile.rating)
+      ? profile.rating.toFixed(1)
+      : "—";
+  const tripsValue =
+    typeof profile?.total_trips === "number" && Number.isFinite(profile.total_trips)
+      ? String(profile.total_trips)
+      : "—";
+  const seatsValue =
+    typeof (vehicle?.seats ?? profile?.car_seats) === "number"
+      ? `${vehicle?.seats ?? profile?.car_seats} seats`
+      : "Not set";
 
   // Avatar / Car photo upload
   const handlePhotoUpload = async (target: "avatar" | "vehicle", source: "camera" | "library") => {
@@ -310,7 +535,7 @@ const Profile = () => {
       } else {
         Alert.alert("Document", "Could not generate secure view link.");
       }
-    } catch (err) {
+    } catch {
       Alert.alert("Document", "Could not load document preview.");
     }
   };
@@ -360,108 +585,28 @@ const Profile = () => {
     ]);
   };
 
-  // Spacious Document Row Component
-  const ProfileDocRow = ({ kind, title, subtitle, icon }: { kind: DocKind; title: string; subtitle: string; icon: any }) => {
-    const docEntry = savedDocs?.[kind];
-    const isUploaded = Boolean(docEntry?.path);
-    const docStatus: AutomatedDocStatus | "unverified" =
-      isUploaded ? docEntry?.status ?? "pending_review" : "unverified";
-    const pill = STATUS_PILL_CONFIG[docStatus];
-    const isBusy = savingDocKind === kind;
-
-    return (
-      <View className="mb-3.5 overflow-hidden rounded-2xl border border-[#E9E2F0] bg-white p-4 shadow-sm">
-        <View className="flex-row items-center justify-between">
-          <View className="flex-1 flex-row items-center gap-3.5 pr-2">
-            <View
-              className={`h-11 w-11 items-center justify-center rounded-xl ${
-                isUploaded ? "bg-[#F0E6FA]" : "bg-[#F7F4FB]"
-              }`}
-            >
-              <Ionicons
-                name={icon}
-                size={22}
-                color={isUploaded ? "#5A189A" : "#746A7E"}
-              />
-            </View>
-            <View className="flex-1">
-              <Text className="text-[14.5px] font-JakartaBold text-[#21152F]">
-                {title}
-              </Text>
-              <Text className="mt-0.5 text-[11.5px] font-Jakarta text-[#746A7E]" numberOfLines={1}>
-                {subtitle}
-              </Text>
-            </View>
-          </View>
-
-          <View className={`flex-row items-center gap-1 rounded-full px-2.5 py-1 ${pill.bg}`}>
-            <Ionicons name={pill.icon} size={12} color={pill.text.replace("text-", "").replace("[", "").replace("]", "")} />
-            <Text className={`text-[11px] font-JakartaBold ${pill.text}`}>
-              {pill.label}
-            </Text>
-          </View>
-        </View>
-
-        <View className="mt-3.5 flex-row items-center justify-between border-t border-[#F0E6FA] pt-3">
-          <Text className="text-[11px] font-Jakarta text-[#746A7E]">
-            {isUploaded ? "Document on file" : "Legal transport requirement"}
-          </Text>
-
-          <TouchableOpacity
-            onPress={() => setActiveDocKind(kind)}
-            disabled={isBusy}
-            activeOpacity={0.7}
-            className="flex-row items-center gap-1 rounded-xl bg-[#5A189A] px-3.5 py-2"
-          >
-            {isBusy ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Ionicons name={isUploaded ? "sync-outline" : "add"} size={13} color="#fff" />
-                <Text className="text-[11.5px] font-JakartaBold text-white">
-                  {isUploaded ? "Update / View" : "Upload"}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView className="flex-1 bg-[#F7F4FB]">
       <ScrollView
-        className="px-6"
-        contentContainerStyle={{ paddingBottom: 120, paddingTop: 6 }}
+        className="px-4 sm:px-6"
+        contentContainerStyle={{
+          paddingBottom: Math.max(128, insets.bottom + 112),
+          paddingTop: 4,
+        }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5A189A" />
         }
       >
-        {/* Top Header with Generous Padding */}
-        <View className="mb-5 flex-row items-center justify-between pt-3">
-          <View>
-            <Text className="text-[25px] font-JakartaExtraBold tracking-tight text-[#21152F]">
+        <View className="mb-4 flex-row items-start justify-between pt-2">
+          <View className="min-w-0 flex-1">
+            <Text className="text-[25px] font-JakartaExtraBold leading-8 tracking-tight text-[#21152F]">
               Driver Profile
             </Text>
-            <Text className="mt-0.5 text-[12.5px] font-JakartaMedium text-[#746A7E]">
-              Account credentials, vehicle & transport compliance
+            <Text className="mt-0.5 text-[12.5px] font-JakartaMedium leading-[18px] text-[#746A7E]">
+              Account, vehicle and transport compliance
             </Text>
           </View>
-
-          <TouchableOpacity
-            onPress={() =>
-              router.push({
-                pathname: "/(root)/edit-profile",
-                params: { field: "name", label: "Full Name" },
-              })
-            }
-            activeOpacity={0.7}
-            className="h-11 w-11 items-center justify-center rounded-2xl border border-[#E9E2F0] bg-white shadow-sm"
-          >
-            <Ionicons name="pencil-outline" size={18} color="#5A189A" />
-          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -473,218 +618,215 @@ const Profile = () => {
           </View>
         ) : (
           <>
-            {/* HERO EXECUTIVE CARD (Spacious, Clean & Breathable) */}
-            <View className="mb-6 rounded-3xl border border-[#E9E2F0] bg-white p-6 shadow-sm">
-              {/* Driver Identity Row: Avatar + Details */}
-              <View className="flex-row items-center gap-4">
-                {/* Avatar with Camera Overlay */}
+            <View className="mb-5 items-center rounded-[32px] border border-[#E9E2F0] bg-white px-5 py-7 shadow-sm">
+              <View className="relative mb-5">
                 <Pressable
-                  onPress={() => setActivePhotoType("avatar")}
-                  className="relative active:opacity-90"
+                  onPress={() =>
+                    profile?.profile_image_url
+                      ? setPreviewImageUri(profile.profile_image_url)
+                      : setActivePhotoType("avatar")
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    profile?.profile_image_url ? "View profile photo" : "Add profile photo"
+                  }
+                  className="active:opacity-90"
                 >
                   {profile?.profile_image_url ? (
                     <Image
                       source={{ uri: profile.profile_image_url }}
-                      className="h-20 w-20 rounded-full border-2 border-[#5A189A]/20 bg-[#F0E6FA]"
+                      accessibilityLabel="Driver profile photo"
+                      className="h-28 w-28 rounded-full border-4 border-[#F0E6FA] bg-[#F0E6FA]"
                     />
                   ) : (
-                    <View className="h-20 w-20 items-center justify-center rounded-full border-2 border-[#5A189A]/20 bg-[#F0E6FA]">
-                      <Ionicons name="person" size={36} color="#5A189A" />
+                    <View className="h-28 w-28 items-center justify-center rounded-full border-4 border-[#F0E6FA] bg-[#6C3BFF]">
+                      <Ionicons name="person" size={56} color="#FFFFFF" />
                     </View>
                   )}
-                  <View className="absolute bottom-0 right-0 h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#5A189A] shadow-sm">
-                    {savingPhoto ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Ionicons name="camera" size={13} color="#fff" />
-                    )}
-                  </View>
                 </Pressable>
-
-                {/* Name, Contact & Verification Pill */}
-                <View className="flex-1">
-                  <View className="flex-row items-center gap-1.5">
-                    <Text className="text-[20px] font-JakartaExtraBold text-[#21152F]" numberOfLines={1}>
-                      {profile?.name ?? user?.fullName ?? "Driver"}
-                    </Text>
-                    {approved && (
-                      <Ionicons name="checkmark-circle" size={18} color="#5A189A" />
-                    )}
-                  </View>
-
-                  <Text className="mt-0.5 text-[13px] font-JakartaMedium text-[#746A7E]">
-                    {profile?.phone_number ?? user?.primaryPhoneNumber?.phoneNumber ?? "No phone added"}
-                  </Text>
-
-                  {/* Compliance Pill */}
-                  <View className="mt-2 flex-row items-center gap-2">
-                    <View
-                      className={`flex-row items-center gap-1.5 rounded-full px-3 py-1 ${
-                        approved
-                          ? "bg-[#F0E6FA]"
-                          : driverStatus === "pending"
-                            ? "bg-[#FFF6E5]"
-                            : "bg-[#FEF3F3]"
-                      }`}
-                    >
-                      <Ionicons
-                        name={approved ? "shield-checkmark" : driverStatus === "pending" ? "time-outline" : "alert-circle"}
-                        size={13}
-                        color={approved ? "#5A189A" : driverStatus === "pending" ? "#D99A1B" : "#B02A2A"}
-                      />
-                      <Text
-                        className={`text-[11.5px] font-JakartaBold ${
-                          approved
-                            ? "text-[#5A189A]"
-                            : driverStatus === "pending"
-                              ? "text-[#D99A1B]"
-                              : "text-[#B02A2A]"
-                        }`}
-                      >
-                        {approved
-                          ? "Approved Partner"
-                          : driverStatus === "pending"
-                            ? "In Review"
-                            : "Action Required"}
-                      </Text>
-                    </View>
-
-                    {profile?.profile_image_url && (
-                      <TouchableOpacity
-                        onPress={() => setPreviewImageUri(profile.profile_image_url)}
-                        className="rounded-full border border-[#E9E2F0] bg-[#F7F4FB] px-2.5 py-1 active:opacity-70"
-                      >
-                        <Text className="text-[11px] font-JakartaMedium text-[#5A189A]">
-                          View
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
+                <TouchableOpacity
+                  onPress={() => setActivePhotoType("avatar")}
+                  disabled={savingPhoto}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change profile photo"
+                  className="absolute bottom-0 right-0 h-10 w-10 items-center justify-center rounded-full border-4 border-white bg-[#9D4EDD] shadow-sm"
+                >
+                  {savingPhoto ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="camera" size={17} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
               </View>
 
-              {/* Thin Separator */}
-              <View className="my-5 h-[1px] bg-[#F0EBF5]" />
-
-              {/* Driver Online / Availability Controller (Dedicated Full-Width Bar) */}
-              <View
-                className={`flex-row items-center justify-between rounded-2xl p-4 border ${
-                  isOnline
-                    ? "bg-[#ECFDF5] border-[#A7F3D0]"
-                    : "bg-[#F7F4FB] border-[#E9E2F0]"
-                }`}
-              >
-                <View className="flex-1 pr-3">
-                  <View className="flex-row items-center gap-2">
-                    <View
-                      className={`h-2.5 w-2.5 rounded-full ${
-                        isOnline ? "bg-[#10B981]" : "bg-[#9CA3AF]"
-                      }`}
-                    />
-                    <Text
-                      className={`text-[13.5px] font-JakartaBold ${
-                        isOnline ? "text-[#065F46]" : "text-[#21152F]"
-                      }`}
-                    >
-                      {isOnline ? "DRIVER STATUS: ONLINE" : "DRIVER STATUS: OFFLINE"}
-                    </Text>
-                  </View>
+              <View className="w-full items-center">
+                <View className="flex-row items-center justify-center gap-1.5">
+                  <Text className="shrink text-center text-[21px] font-JakartaExtraBold leading-7 text-[#21152F]">
+                    {displayName}
+                  </Text>
+                  {approved && (
+                    <Ionicons name="checkmark-circle" size={18} color="#5A189A" />
+                  )}
+                </View>
+                <Text className="mt-1 text-center text-[14px] font-JakartaMedium leading-5 text-[#746A7E]">
+                  {emailAddress}
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(root)/edit-profile",
+                      params: { field: "phone_number", label: "Phone Number" },
+                    })
+                  }
+                  accessibilityRole="button"
+                  className="mt-1 items-center"
+                >
+                  <Text className="text-center text-[13px] font-JakartaMedium leading-5 text-[#746A7E]">
+                    {phoneNumber}
+                  </Text>
+                </TouchableOpacity>
+                <View
+                  className={`mt-3 flex-row items-center gap-1.5 rounded-full px-3 py-1 ${
+                    approved
+                      ? "bg-[#F0E6FA]"
+                      : driverStatus === "pending"
+                        ? "bg-[#FFF6E5]"
+                        : driverStatus === "rejected"
+                          ? "bg-[#FEF3F3]"
+                          : "bg-[#F7F4FB]"
+                  }`}
+                >
+                  <Ionicons
+                    name={
+                      approved
+                        ? "shield-checkmark"
+                        : driverStatus === "pending"
+                          ? "time-outline"
+                          : "alert-circle"
+                    }
+                    size={13}
+                    color={
+                      approved
+                        ? "#5A189A"
+                        : driverStatus === "pending"
+                          ? "#D99A1B"
+                          : driverStatus === "rejected"
+                            ? "#B02A2A"
+                            : "#746A7E"
+                    }
+                  />
                   <Text
-                    className={`mt-1 text-[12px] font-Jakarta ${
-                      isOnline ? "text-[#047857]" : "text-[#746A7E]"
+                    className={`text-[11.5px] font-JakartaBold ${
+                      approved
+                        ? "text-[#5A189A]"
+                        : driverStatus === "pending"
+                          ? "text-[#D99A1B]"
+                          : driverStatus === "rejected"
+                            ? "text-[#B02A2A]"
+                            : "text-[#746A7E]"
                     }`}
                   >
-                    {isOnline
-                      ? "Ready and receiving passenger ride requests"
-                      : approved
-                        ? "Toggle switch to go on-duty and receive trips"
-                        : "Requires document approval before going online"}
+                    {approved
+                      ? "Approved Partner"
+                      : driverStatus === "pending"
+                        ? "Approval pending"
+                        : driverStatus === "rejected"
+                          ? "Approval rejected"
+                          : "Approval required"}
                   </Text>
                 </View>
-
-                {togglingOnline ? (
-                  <ActivityIndicator size="small" color="#5A189A" />
-                ) : (
-                  <Switch
-                    value={isOnline}
-                    onValueChange={handleToggleOnline}
-                    trackColor={{ false: "#D1D5DB", true: "#10B981" }}
-                    thumbColor="#FFFFFF"
-                  />
-                )}
               </View>
             </View>
 
-            {/* PERFORMANCE STATS */}
-            <View className="mb-7 flex-row gap-3.5">
-              <StatCard
+            <View className="mb-6 flex-row gap-2.5">
+              <ProfileMetricCard
                 icon="star-outline"
                 label="Rating"
-                value={Number(profile?.rating ?? 5).toFixed(1)}
+                value={ratingValue}
               />
-              <StatCard
+              <ProfileMetricCard
                 icon="car-sport-outline"
-                label="Trips"
-                value={String(profile?.total_trips ?? 0)}
+                label="Completed trips"
+                value={tripsValue}
               />
-              <StatCard
-                icon="people-outline"
-                label="Seats"
-                value={String(vehicle?.seats ?? profile?.car_seats ?? 3)}
+              <ProfileMetricCard
+                icon="shield-checkmark-outline"
+                label="Verification progress"
+                value={`${verificationProgress}%`}
               />
             </View>
 
-            {/* PERMITS & VEHICLE DOCUMENTATION SECTION (Spacious & Distinct) */}
-            <View className="mb-3.5 flex-row items-center justify-between">
-              <View>
-                <Text className="text-[17px] font-JakartaExtraBold text-[#21152F]">
-                  Permits & Vehicle Documents
+            <View className="mb-7 rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
+              <View className="flex-row items-start justify-between gap-3">
+                <View className="min-w-0 flex-1">
+                  <Text className="text-[17px] font-JakartaExtraBold leading-6 text-[#21152F]">
+                    Verification progress
+                  </Text>
+                  <Text className="mt-1 text-[12px] font-Jakarta leading-[18px] text-[#746A7E]">
+                    {verifiedRequirements} of {verificationItems.length} required checks verified
+                  </Text>
+                </View>
+                <Text className="shrink-0 text-[18px] font-JakartaExtraBold text-[#5A189A]">
+                  {verificationProgress}%
                 </Text>
-                <Text className="mt-0.5 text-[12px] font-JakartaMedium text-[#746A7E]">
-                  Verified against official South African transport registers
+              </View>
+              <View
+                accessibilityRole="progressbar"
+                accessibilityValue={{ min: 0, max: 100, now: verificationProgress }}
+                className="mt-4 h-2.5 overflow-hidden rounded-full bg-[#F0E6FA]"
+              >
+                <View
+                  className="h-full rounded-full bg-[#5A189A]"
+                  style={{ width: `${verificationProgress}%` }}
+                />
+              </View>
+              <View className="mt-2">
+                {verificationItems.slice(0, 2).map((item) => (
+                  <VerificationChecklistRow
+                    key={item.title}
+                    title={item.title}
+                    status={item.status}
+                  />
+                ))}
+              </View>
+              <View className="mt-4">
+                <Text className="text-[15px] font-JakartaExtraBold leading-5 text-[#21152F]">
+                  Permits & vehicle documents
                 </Text>
+                <Text className="mt-0.5 text-[12px] font-JakartaMedium leading-[18px] text-[#746A7E]">
+                  Document review status is separate from partner approval.
+                </Text>
+              </View>
+              <View className="mt-3">
+                {[...REQUIRED_DRIVER_DOCUMENTS, "roadworthy" as const].map((kind) => (
+                  <ProfileDocRow
+                    key={kind}
+                    kind={kind}
+                    docEntry={savedDocs[kind]}
+                    isBusy={savingDocKind === kind}
+                    onManage={() => setActiveDocKind(kind)}
+                  />
+                ))}
               </View>
               <TouchableOpacity
                 onPress={() => router.push("/(root)/verification")}
-                className="flex-row items-center gap-1 active:opacity-70"
+                accessibilityRole="button"
+                className="mt-1 min-h-11 flex-row items-center justify-center gap-2 rounded-xl bg-[#F0E6FA] px-4 py-3 active:opacity-70"
               >
-                <Text className="text-[12.5px] font-JakartaBold text-[#5A189A]">
-                  All Status
+                <Text className="text-[13px] font-JakartaBold text-[#5A189A]">
+                  Continue verification
                 </Text>
-                <Ionicons name="chevron-forward" size={14} color="#5A189A" />
+                <Ionicons name="arrow-forward" size={15} color="#5A189A" />
               </TouchableOpacity>
             </View>
 
-            <View className="mb-7">
-              <ProfileDocRow
-                kind="pdp"
-                title="Driver Permit (PrDP Category P)"
-                subtitle="Professional Driving Permit for passenger transport"
-                icon="ribbon-outline"
-              />
-
-              <ProfileDocRow
-                kind="vehicle_registration"
-                title="Vehicle Licence Disc"
-                subtitle="Windscreen disc matching vehicle registration plate"
-                icon="disc-outline"
-              />
-
-              <ProfileDocRow
-                kind="insurance"
-                title="Passenger Insurance Policy"
-                subtitle="Active policy schedule with passenger liability"
-                icon="shield-outline"
-              />
-            </View>
-
-            {/* MY VEHICLE CARD */}
-            <View className="mb-3 flex-row items-center justify-between">
-              <Text className="text-[17px] font-JakartaExtraBold text-[#21152F]">
-                My Vehicle & Photo
+            <View className="mb-3 flex-row items-start justify-between gap-3">
+              <Text className="min-w-0 flex-1 text-[17px] font-JakartaExtraBold leading-6 text-[#21152F]">
+                Vehicle information
               </Text>
               <TouchableOpacity
                 onPress={() => router.push("/(root)/vehicle-details")}
+                accessibilityRole="button"
                 className="flex-row items-center gap-1 active:opacity-70"
               >
                 <Text className="text-[12.5px] font-JakartaBold text-[#5A189A]">
@@ -694,69 +836,65 @@ const Profile = () => {
               </TouchableOpacity>
             </View>
 
-            <View className="mb-7 rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
-              <View className="flex-row items-center gap-4">
-                <Pressable
-                  onPress={() => {
-                    if (vehiclePhotoUrl) {
-                      setPreviewImageUri(vehiclePhotoUrl);
-                    } else {
-                      setActivePhotoType("vehicle");
-                    }
-                  }}
-                  className="relative active:opacity-80"
-                >
+            <View className="mb-5 rounded-3xl border border-[#E9E2F0] bg-white p-4 shadow-sm">
+              <View className="flex-row items-center gap-3">
+                <View className="relative h-[82px] w-[104px] shrink-0 overflow-hidden rounded-2xl bg-[#F0E6FA]">
                   {vehiclePhotoUrl ? (
                     <Image
                       source={{ uri: vehiclePhotoUrl }}
-                      className="h-22 w-26 rounded-2xl bg-[#F0E6FA]"
+                      accessibilityLabel="Vehicle photo"
+                      className="h-full w-full"
                       resizeMode="cover"
                     />
                   ) : (
-                    <View className="h-22 w-26 items-center justify-center rounded-2xl border-2 border-dashed border-[#C77DFF] bg-[#F7F4FB]">
+                    <View className="h-full w-full items-center justify-center border-2 border-dashed border-[#C77DFF] bg-[#F7F4FB]">
                       <Ionicons name="car-outline" size={26} color="#5A189A" />
-                      <Text className="mt-1 text-[10.5px] font-JakartaBold text-[#5A189A]">
-                        Add Photo
+                      <Text className="mt-1 text-[10.5px] font-JakartaBold text-[#746A7E]">
+                        No photo
                       </Text>
                     </View>
                   )}
 
                   {vehiclePhotoUrl && (
-                    <View className="absolute bottom-1 right-1 rounded-full bg-black/60 p-1">
+                    <Pressable
+                      onPress={() => setPreviewImageUri(vehiclePhotoUrl)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Preview vehicle photo"
+                      className="absolute bottom-1 right-1 rounded-full bg-black/60 p-1.5"
+                    >
                       <Ionicons name="expand" size={12} color="#fff" />
-                    </View>
+                    </Pressable>
                   )}
-                </Pressable>
+                </View>
 
-                <View className="flex-1">
-                  <Text className="text-[16px] font-JakartaExtraBold text-[#21152F]">
-                    {vehicle?.make ? `${vehicle.make} ${vehicle.model}` : "Add Vehicle Details"}
+                <View className="min-w-0 flex-1">
+                  <Text className="text-[15px] font-JakartaExtraBold leading-5 text-[#21152F]">
+                    {[vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle details not added"}
                   </Text>
-                  <Text className="mt-0.5 text-[12.5px] font-JakartaMedium text-[#746A7E]">
-                    {vehicle?.colour ? `${vehicle.colour} · ` : ""}
-                    {vehicle?.year ? `${vehicle.year} · ` : ""}
-                    {vehicle?.seats ? `${vehicle.seats} seats` : "3 seats"}
+                  <Text className="mt-1 text-[12px] font-JakartaMedium leading-[18px] text-[#746A7E]">
+                    {[vehicle?.colour, vehicle?.year, seatsValue !== "Not set" ? seatsValue : null]
+                      .filter(Boolean)
+                      .join(" · ") || "Colour, year and seating not added"}
                   </Text>
 
-                  <View className="mt-2.5 self-start rounded-lg border border-[#21152F] bg-[#FFFBEA] px-3 py-1">
-                    <Text className="text-[12.5px] font-JakartaExtraBold tracking-wider text-[#21152F]">
-                      {vehicle?.plate ? vehicle.plate.toUpperCase() : "NO PLATE SET"}
-                    </Text>
-                  </View>
+                  <Text className="mt-2 text-[11.5px] font-JakartaBold text-[#21152F]">
+                    {vehicle?.plate ? vehicle.plate.toUpperCase() : "Registration not added"}
+                  </Text>
                 </View>
               </View>
 
-              <View className="mt-4 flex-row items-center justify-between border-t border-[#F0E6FA] pt-3.5">
-                <Text className="text-[12px] font-Jakarta text-[#746A7E]">
-                  {vehiclePhotoUrl ? "Vehicle photo verified" : "Helps passengers identify your car"}
+              <View className="mt-4 flex-row items-center justify-between gap-3 border-t border-[#F0E6FA] pt-3.5">
+                <Text className="min-w-0 flex-1 text-[12px] font-Jakarta leading-[18px] text-[#746A7E]">
+                  {vehiclePhotoUrl ? "Vehicle photo saved" : "A clear photo helps passengers find your car."}
                 </Text>
                 <TouchableOpacity
                   onPress={() => setActivePhotoType("vehicle")}
-                  className="flex-row items-center gap-1.5 rounded-xl bg-[#F0E6FA] px-3.5 py-2 active:opacity-70"
+                  accessibilityRole="button"
+                  className="min-h-10 shrink-0 flex-row items-center justify-center gap-1.5 rounded-xl bg-[#F0E6FA] px-3 py-2 active:opacity-70"
                 >
                   <Ionicons name="camera" size={13} color="#5A189A" />
-                  <Text className="text-[12px] font-JakartaBold text-[#5A189A]">
-                    {vehiclePhotoUrl ? "Change Photo" : "Upload Photo"}
+                  <Text className="text-[11px] font-JakartaBold text-[#5A189A]">
+                    {vehiclePhotoUrl ? "Change photo" : "Add photo"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -808,9 +946,8 @@ const Profile = () => {
               })}
             </View>
 
-            {/* DRIVING & FINANCES */}
             <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
-              Driving & Finances
+              Driving, earnings & payouts
             </Text>
             <View className="mb-7">
               <SectionCard
@@ -837,52 +974,8 @@ const Profile = () => {
               />
             </View>
 
-            {/* ACCOUNT & SAFETY */}
             <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
-              Account & Safety
-            </Text>
-            <View className="mb-7">
-              <SectionCard
-                title="Full Name"
-                value={profile?.name ?? user?.fullName ?? "Not set"}
-                icon="person-outline"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(root)/edit-profile",
-                    params: { field: "name", label: "Full Name" },
-                  })
-                }
-              />
-              <SectionCard
-                title="Phone Number"
-                value={profile?.phone_number ?? user?.primaryPhoneNumber?.phoneNumber ?? "Not set"}
-                icon="call-outline"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(root)/edit-profile",
-                    params: { field: "phone_number", label: "Phone Number" },
-                  })
-                }
-              />
-              <SectionCard
-                title="Emergency Contact (ICE)"
-                value={
-                  profile?.profile_data?.emergency_contact ??
-                  "Add emergency contact for roadside safety"
-                }
-                icon="heart-outline"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(root)/edit-profile",
-                    params: { field: "emergency_contact", label: "Emergency Contact" },
-                  })
-                }
-              />
-            </View>
-
-            {/* SUPPORT */}
-            <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
-              Driver Support
+              Driver support
             </Text>
             <View className="mb-7">
               <SectionCard
@@ -905,8 +998,46 @@ const Profile = () => {
               />
             </View>
 
-            {/* SIGN OUT */}
-            <View className="mb-10">
+            <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
+              Account & personal information
+            </Text>
+            <View className="mb-7">
+              <SectionCard
+                title="Full Name"
+                value={displayName}
+                icon="person-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(root)/edit-profile",
+                    params: { field: "name", label: "Full Name" },
+                  })
+                }
+              />
+              <SectionCard
+                title="Email"
+                value={emailAddress}
+                icon="mail-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(root)/edit-profile",
+                    params: { field: "email", label: "Email" },
+                  })
+                }
+              />
+              <SectionCard
+                title="Emergency Contact (ICE)"
+                value={
+                  profile?.profile_data?.emergency_contact?.trim() ||
+                  "Not added"
+                }
+                icon="heart-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(root)/edit-profile",
+                    params: { field: "emergency_contact", label: "Emergency Contact" },
+                  })
+                }
+              />
               <SectionCard
                 title="Sign Out"
                 value="Log out of driver account"
@@ -936,7 +1067,11 @@ const Profile = () => {
           className="flex-1 justify-end bg-black/60"
           onPress={() => setActiveDocKind(null)}
         >
-          <View className="rounded-t-3xl bg-white px-6 pb-10 pt-5">
+          <ScrollView
+            className="max-h-[85%] rounded-t-3xl bg-white px-6 pt-5"
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 20 }}
+            showsVerticalScrollIndicator={false}
+          >
             <View className="items-center pb-4">
               <View className="h-1.5 w-12 rounded-full bg-[#E9E2F0]" />
             </View>
@@ -951,20 +1086,20 @@ const Profile = () => {
             <View className="mt-6 gap-3">
               <TouchableOpacity
                 onPress={() => activeDocKind && handleDocumentUpload(activeDocKind, "camera")}
-                className="flex-row items-center gap-3.5 rounded-2xl bg-[#5A189A] px-5 py-4 active:opacity-80"
+                className="min-h-12 flex-row items-center gap-3 rounded-2xl bg-[#5A189A] px-4 py-3 active:opacity-80"
               >
                 <Ionicons name="camera" size={20} color="#fff" />
-                <Text className="text-[15px] font-JakartaBold text-white">
+                <Text className="min-w-0 flex-1 text-[15px] font-JakartaBold leading-5 text-white">
                   Take Photo with Camera
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={() => activeDocKind && handleDocumentUpload(activeDocKind, "library")}
-                className="flex-row items-center gap-3.5 rounded-2xl border border-[#E9E2F0] bg-[#F7F4FB] px-5 py-4 active:opacity-70"
+                className="min-h-12 flex-row items-center gap-3 rounded-2xl border border-[#E9E2F0] bg-[#F7F4FB] px-4 py-3 active:opacity-70"
               >
                 <Ionicons name="images-outline" size={20} color="#5A189A" />
-                <Text className="text-[15px] font-JakartaBold text-[#5A189A]">
+                <Text className="min-w-0 flex-1 text-[15px] font-JakartaBold leading-5 text-[#5A189A]">
                   Choose from Photo Library
                 </Text>
               </TouchableOpacity>
@@ -972,26 +1107,14 @@ const Profile = () => {
               {activeDocKind && Boolean(savedDocs?.[activeDocKind]?.path) && (
                 <TouchableOpacity
                   onPress={() => handleViewSavedDoc(activeDocKind)}
-                  className="flex-row items-center gap-3.5 rounded-2xl border border-[#E9E2F0] bg-white px-5 py-4 active:opacity-70"
+                  className="min-h-12 flex-row items-center gap-3 rounded-2xl border border-[#E9E2F0] bg-white px-4 py-3 active:opacity-70"
                 >
                   <Ionicons name="eye-outline" size={20} color="#21152F" />
-                  <Text className="text-[15px] font-JakartaSemiBold text-[#21152F]">
+                  <Text className="min-w-0 flex-1 text-[15px] font-JakartaSemiBold leading-5 text-[#21152F]">
                     View Current Document
                   </Text>
                 </TouchableOpacity>
               )}
-
-              <TouchableOpacity
-                onPress={() => {
-                  setActiveDocKind(null);
-                  router.push("/(root)/verification");
-                }}
-                className="items-center py-2.5 active:opacity-70"
-              >
-                <Text className="text-[13px] font-JakartaBold text-[#5A189A]">
-                  Open Full Verification Screen →
-                </Text>
-              </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={() => setActiveDocKind(null)}
@@ -1002,7 +1125,7 @@ const Profile = () => {
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </ScrollView>
         </Pressable>
       </Modal>
 
@@ -1017,7 +1140,11 @@ const Profile = () => {
           className="flex-1 justify-end bg-black/60"
           onPress={() => setActivePhotoType(null)}
         >
-          <View className="rounded-t-3xl bg-white px-6 pb-10 pt-5">
+          <ScrollView
+            className="max-h-[85%] rounded-t-3xl bg-white px-6 pt-5"
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 20 }}
+            showsVerticalScrollIndicator={false}
+          >
             <View className="items-center pb-4">
               <View className="h-1.5 w-12 rounded-full bg-[#E9E2F0]" />
             </View>
@@ -1034,20 +1161,20 @@ const Profile = () => {
             <View className="mt-6 gap-3">
               <TouchableOpacity
                 onPress={() => activePhotoType && handlePhotoUpload(activePhotoType, "camera")}
-                className="flex-row items-center gap-3.5 rounded-2xl bg-[#5A189A] px-5 py-4 active:opacity-80"
+                className="min-h-12 flex-row items-center gap-3 rounded-2xl bg-[#5A189A] px-4 py-3 active:opacity-80"
               >
                 <Ionicons name="camera" size={20} color="#fff" />
-                <Text className="text-[15px] font-JakartaBold text-white">
+                <Text className="min-w-0 flex-1 text-[15px] font-JakartaBold leading-5 text-white">
                   Take Photo with Camera
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={() => activePhotoType && handlePhotoUpload(activePhotoType, "library")}
-                className="flex-row items-center gap-3.5 rounded-2xl border border-[#E9E2F0] bg-[#F7F4FB] px-5 py-4 active:opacity-70"
+                className="min-h-12 flex-row items-center gap-3 rounded-2xl border border-[#E9E2F0] bg-[#F7F4FB] px-4 py-3 active:opacity-70"
               >
                 <Ionicons name="images-outline" size={20} color="#5A189A" />
-                <Text className="text-[15px] font-JakartaBold text-[#5A189A]">
+                <Text className="min-w-0 flex-1 text-[15px] font-JakartaBold leading-5 text-[#5A189A]">
                   Choose from Photo Library
                 </Text>
               </TouchableOpacity>
@@ -1061,7 +1188,7 @@ const Profile = () => {
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </ScrollView>
         </Pressable>
       </Modal>
 

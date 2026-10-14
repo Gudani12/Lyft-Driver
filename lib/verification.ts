@@ -2,6 +2,10 @@
 // Verification: picking, uploading and submitting identity documents.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import * as ImagePicker from "expo-image-picker";
+
+import { fetchAPI } from "@/lib/fetch";
+
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function decode(base64: string): ArrayBuffer {
@@ -26,10 +30,6 @@ function decode(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-import * as ImagePicker from "expo-image-picker";
-
-import { fetchAPI } from "@/lib/fetch";
-
 export const BUCKET = "verification-documents";
 
 export type DocKind =
@@ -42,6 +42,12 @@ export type DocKind =
   | "roadworthy"
   | "insurance"
   | "vehicle_photo";
+
+export const REQUIRED_DRIVER_DOCUMENTS: DocKind[] = [
+  "pdp",
+  "vehicle_registration",
+  "insurance",
+];
 
 export const EXPIRING_DOCS: DocKind[] = [
   "licence",

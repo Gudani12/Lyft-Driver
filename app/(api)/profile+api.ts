@@ -91,7 +91,7 @@ export async function GET(request: Request) {
       }
     }
 
-    let driverRating = Number(profile?.rating ?? 5);
+    let driverRating = parseNumber(profile?.rating);
     if (profile) {
       const { data: ratings, error: ratingsError } = await supabase
         .from("driver_ratings")
@@ -108,12 +108,14 @@ export async function GET(request: Request) {
       } else if (ratingsError) {
         throw ratingsError;
       } else if (ratings?.length) {
-        driverRating =
-          ratings.reduce(
-            (total: number, entry: { rating: number }) =>
-              total + Number(entry.rating),
-            0,
-          ) / ratings.length;
+        const recordedRatings = ratings
+          .map((entry: { rating: number }) => parseNumber(entry.rating))
+          .filter((rating: number | null): rating is number => rating !== null);
+        if (recordedRatings.length) {
+          driverRating =
+            recordedRatings.reduce((total: number, rating: number) => total + rating, 0) /
+            recordedRatings.length;
+        }
       }
     }
 
@@ -121,7 +123,7 @@ export async function GET(request: Request) {
       data: profile
         ? {
             ...profile,
-            rating: Number(driverRating.toFixed(2)),
+            rating: driverRating === null ? null : Number(driverRating.toFixed(2)),
             vehicle,
             name:
               profile.full_name ||

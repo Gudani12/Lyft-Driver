@@ -12,6 +12,7 @@ describe('profile API route', () => {
 
   it('INT-PROFILE-01: GET returns 400 when clerkId is missing', async () => {
     setupSupabase({ from: jest.fn() });
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { GET } = require('../../app/(api)/profile+api');
     const request = new Request('https://example.com/api/profile', { method: 'GET' });
     const response = await GET(request);
@@ -26,6 +27,7 @@ describe('profile API route', () => {
 
     setupSupabase({ from: jest.fn(() => chain) });
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { GET } = require('../../app/(api)/profile+api');
     const request = new Request(
       'https://example.com/api/profile?clerkId=clerk_new',
@@ -40,6 +42,7 @@ describe('profile API route', () => {
   it('INT-PROFILE-03: POST returns 400 when clerkId is missing from body', async () => {
     setupSupabase({ from: jest.fn() });
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { POST } = require('../../app/(api)/profile+api');
     const request = new Request('https://example.com/api/profile', {
       method: 'POST',
@@ -71,6 +74,7 @@ describe('profile API route', () => {
 
     setupSupabase({ from: jest.fn(() => chain) });
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { POST } = require('../../app/(api)/profile+api');
     const request = new Request('https://example.com/api/profile', {
       method: 'POST',
@@ -91,43 +95,38 @@ describe('profile API route', () => {
   });
 
   it('INT-PROFILE-05: GET builds the displayed name from first and last name', async () => {
-    const profile = {
-      id: 'driver_1',
-      clerk_id: 'clerk_driver',
-      first_name: 'Sipho',
-      last_name: 'Dlamini',
-      full_name: null,
-      profile_data: {},
-      rating: 5,
-    };
-    const driverChain: any = {};
-    driverChain.select = jest.fn().mockReturnValue(driverChain);
-    driverChain.eq = jest.fn().mockReturnValue(driverChain);
-    driverChain.maybeSingle = jest.fn().mockResolvedValue({
-      data: profile,
+    const driverQuery: any = {};
+    driverQuery.select = jest.fn().mockReturnValue(driverQuery);
+    driverQuery.eq = jest.fn().mockReturnValue(driverQuery);
+    driverQuery.maybeSingle = jest.fn().mockResolvedValue({
+      data: {
+        id: 'driver_1',
+        clerk_id: 'clerk_driver',
+        first_name: 'Sipho',
+        last_name: 'Dlamini',
+        full_name: null,
+        rating: 5,
+        profile_data: {},
+      },
       error: null,
     });
 
-    const vehicleChain: any = {};
-    vehicleChain.select = jest.fn().mockReturnValue(vehicleChain);
-    vehicleChain.eq = jest.fn().mockReturnValue(vehicleChain);
-    vehicleChain.maybeSingle = jest.fn().mockResolvedValue({
-      data: null,
-      error: null,
-    });
+    const vehicleQuery: any = {};
+    vehicleQuery.select = jest.fn().mockReturnValue(vehicleQuery);
+    vehicleQuery.eq = jest.fn().mockReturnValue(vehicleQuery);
+    vehicleQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
 
-    const ratingsChain: any = {};
-    ratingsChain.select = jest.fn().mockReturnValue(ratingsChain);
-    ratingsChain.eq = jest.fn().mockResolvedValue({ data: [], error: null });
+    const ratingsQuery: any = {};
+    ratingsQuery.select = jest.fn().mockReturnValue(ratingsQuery);
+    ratingsQuery.eq = jest.fn().mockResolvedValue({ data: [], error: null });
 
     setupSupabase({
-      from: jest.fn((table: string) => {
-        if (table === 'drivers') return driverChain;
-        if (table === 'driver_vehicles') return vehicleChain;
-        return ratingsChain;
-      }),
+      from: jest.fn((table: string) =>
+        table === 'drivers' ? driverQuery : table === 'driver_vehicles' ? vehicleQuery : ratingsQuery,
+      ),
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { GET } = require('../../app/(api)/profile+api');
     const request = new Request(
       'https://example.com/api/profile?clerkId=clerk_driver',
@@ -138,5 +137,100 @@ describe('profile API route', () => {
 
     expect(response.status).toBe(200);
     expect(body.data.name).toBe('Sipho Dlamini');
+  });
+
+  it('INT-PROFILE-06: GET does not invent a default rating when none is recorded', async () => {
+    const driverQuery: any = {};
+    driverQuery.select = jest.fn().mockReturnValue(driverQuery);
+    driverQuery.eq = jest.fn().mockReturnValue(driverQuery);
+    driverQuery.maybeSingle = jest.fn().mockResolvedValue({
+      data: {
+        id: 'driver_1',
+        clerk_id: 'clerk_1',
+        first_name: 'Alex',
+        last_name: 'Driver',
+        full_name: 'Alex Driver',
+        rating: null,
+        profile_data: {},
+      },
+      error: null,
+    });
+
+    const vehicleQuery: any = {};
+    vehicleQuery.select = jest.fn().mockReturnValue(vehicleQuery);
+    vehicleQuery.eq = jest.fn().mockReturnValue(vehicleQuery);
+    vehicleQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+
+    const ratingsQuery: any = {};
+    ratingsQuery.select = jest.fn().mockReturnValue(ratingsQuery);
+    ratingsQuery.eq = jest.fn().mockResolvedValue({ data: [], error: null });
+
+    setupSupabase({
+      from: jest.fn((table: string) =>
+        table === 'drivers' ? driverQuery : table === 'driver_vehicles' ? vehicleQuery : ratingsQuery,
+      ),
+    });
+
+    // Load the route after installing the mocked Supabase client.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { GET } = require('../../app/(api)/profile+api');
+    const request = new Request(
+      'https://example.com/api/profile?clerkId=clerk_1',
+      { method: 'GET' },
+    );
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.rating).toBeNull();
+  });
+
+  it('INT-PROFILE-07: GET returns the average of actual driver ratings', async () => {
+    const driverQuery: any = {};
+    driverQuery.select = jest.fn().mockReturnValue(driverQuery);
+    driverQuery.eq = jest.fn().mockReturnValue(driverQuery);
+    driverQuery.maybeSingle = jest.fn().mockResolvedValue({
+      data: {
+        id: 'driver_1',
+        clerk_id: 'clerk_1',
+        first_name: 'Alex',
+        last_name: 'Driver',
+        full_name: 'Alex Driver',
+        rating: 3,
+        profile_data: {},
+      },
+      error: null,
+    });
+
+    const vehicleQuery: any = {};
+    vehicleQuery.select = jest.fn().mockReturnValue(vehicleQuery);
+    vehicleQuery.eq = jest.fn().mockReturnValue(vehicleQuery);
+    vehicleQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+
+    const ratingsQuery: any = {};
+    ratingsQuery.select = jest.fn().mockReturnValue(ratingsQuery);
+    ratingsQuery.eq = jest.fn().mockResolvedValue({
+      data: [{ rating: 4 }, { rating: 5 }],
+      error: null,
+    });
+
+    setupSupabase({
+      from: jest.fn((table: string) =>
+        table === 'drivers' ? driverQuery : table === 'driver_vehicles' ? vehicleQuery : ratingsQuery,
+      ),
+    });
+
+    // Load the route after installing the mocked Supabase client.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { GET } = require('../../app/(api)/profile+api');
+    const request = new Request(
+      'https://example.com/api/profile?clerkId=clerk_1',
+      { method: 'GET' },
+    );
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.rating).toBe(4.5);
   });
 });
