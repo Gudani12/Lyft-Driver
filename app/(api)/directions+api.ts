@@ -55,26 +55,52 @@ export async function GET(request: Request) {
     }
   }
 
-  const osrmUrl = new URL(
-    `https://router.project-osrm.org/route/v1/driving/${originLongitude},${originLatitude};${destinationLongitude},${destinationLatitude}`,
-  );
-  osrmUrl.searchParams.set("overview", "full");
-  osrmUrl.searchParams.set("geometries", "geojson");
+  const routePath =
+    `${originLongitude},${originLatitude};${destinationLongitude},${destinationLatitude}`;
+  const routingServices = [
+    "https://router.project-osrm.org",
+    "https://routing.openstreetmap.de/routed-car",
+  ];
+  let providersUnavailable = false;
 
-  try {
-    const response = await fetch(osrmUrl);
-    if (!response.ok) {
-      console.error(`OSRM directions failed with status ${response.status}.`);
-      return Response.json({ error: "Route lookup is temporarily unavailable." }, { status: 502 });
+  for (const service of routingServices) {
+    const osrmUrl = new URL(`${service}/route/v1/driving/${routePath}`);
+    osrmUrl.searchParams.set("overview", "full");
+    osrmUrl.searchParams.set("geometries", "geojson");
+
+    try {
+      const response = await fetch(osrmUrl);
+      if (!response.ok) {
+        providersUnavailable = true;
+        console.error(`OSRM directions failed with status ${response.status}.`);
+        continue;
+      }
+
+      const body = await response.json();
+      const coordinates = body?.routes?.[0]?.geometry?.coordinates;
+      if (
+        body?.code === "Ok" &&
+        Array.isArray(coordinates) &&
+        coordinates.length > 1
+      ) {
+        return Response.json({ data: { coordinates } });
+      }
+      if (body?.code !== "NoRoute") {
+        providersUnavailable = true;
+        console.error("OSRM directions returned no valid road geometry.");
+      }
+    } catch (error) {
+      providersUnavailable = true;
+      console.error("OSRM directions request failed:", error);
     }
-    const body = await response.json();
-    const coordinates = body?.routes?.[0]?.geometry?.coordinates;
-    if (!Array.isArray(coordinates)) {
-      return Response.json({ error: "No driving route was found." }, { status: 404 });
-    }
-    return Response.json({ data: { coordinates } });
-  } catch (error) {
-    console.error("OSRM directions request failed:", error);
-    return Response.json({ error: "Route lookup is temporarily unavailable." }, { status: 502 });
   }
+
+  if (!providersUnavailable) {
+    return Response.json({ error: "No driving route was found." }, { status: 404 });
+  }
+
+  return Response.json(
+    { error: "Route lookup is temporarily unavailable." },
+    { status: 502 },
+  );
 }
