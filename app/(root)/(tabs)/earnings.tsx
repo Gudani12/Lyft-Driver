@@ -422,9 +422,7 @@ const Earnings = () => {
                       ? isMockWithdrawal
                         ? "Recording…"
                         : "Requesting…"
-                      : isMockWithdrawal
-                        ? `Withdraw R${requested || 0}`
-                        : `Withdraw R${requested || 0}`
+                      : `Withdraw R${requested || 0}`
                   }
                   loading={submitting}
                   disabled={!canWithdraw}
