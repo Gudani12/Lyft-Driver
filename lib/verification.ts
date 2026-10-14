@@ -32,28 +32,39 @@ function decode(base64: string): ArrayBuffer {
 
 export const BUCKET = "verification-documents";
 
+// ─── Document kinds & labels ────────────────────────────────────────────────
+
 export type DocKind =
   | "id_front"
   | "id_back"
   | "selfie"
   | "licence"
   | "pdp"
+  | "police_clearance"
   | "vehicle_registration"
+  | "operating_card"
   | "roadworthy"
   | "insurance"
+  | "operating_licence"
   | "vehicle_photo";
 
 export const REQUIRED_DRIVER_DOCUMENTS: DocKind[] = [
   "pdp",
+  "police_clearance",
   "vehicle_registration",
+  "operating_card",
   "insurance",
+  "operating_licence",
 ];
 
 export const EXPIRING_DOCS: DocKind[] = [
   "licence",
   "pdp",
+  "police_clearance",
   "roadworthy",
   "insurance",
+  "operating_card",
+  "operating_licence",
 ];
 
 export type VerificationStatus =
@@ -69,6 +80,59 @@ export type AutomatedDocStatus =
   | "expired"
   | "mismatch";
 
+export const DOC_LABELS: Record<DocKind, { title: string; help: string }> = {
+  id_front: {
+    title: "ID document",
+    help: "The front of your SA ID card, or the photo page of your passport.",
+  },
+  id_back: {
+    title: "Back of ID",
+    help: "The reverse of your ID card. Skip this if you uploaded a passport.",
+  },
+  selfie: {
+    title: "Selfie",
+    help: "A clear photo of your face in good light, no hat or sunglasses.",
+  },
+  licence: {
+    title: "Driving licence",
+    help: "Both sides of your card licence. The expiry date must be readable.",
+  },
+  pdp: {
+    title: "Professional Driving Permit",
+    help: "Required by law to carry passengers for reward in South Africa.",
+  },
+  police_clearance: {
+    title: "Police Clearance Certificate",
+    help: "SAPS-issued criminal record check, no older than 6 months.",
+  },
+  vehicle_registration: {
+    title: "Vehicle licence disc",
+    help: "The current disc on your windscreen, showing the registration number.",
+  },
+  operating_card: {
+    title: "Operating Card (Double Disk)",
+    help: "Proof the vehicle is licensed to transport passengers commercially.",
+  },
+  roadworthy: {
+    title: "Roadworthy certificate",
+    help: "Proof the vehicle passed its roadworthy test.",
+  },
+  insurance: {
+    title: "Insurance certificate",
+    help: "Your current policy schedule, showing the insured vehicle.",
+  },
+  operating_licence: {
+    title: "Operating Licence",
+    help: "Issued by your Provincial Regulatory Entity (PRE) or the Grant/Decision Letter.",
+  },
+  vehicle_photo: {
+    title: "Photo of your car",
+    help: "Taken from the front at an angle, with the number plate visible.",
+  },
+};
+
+// ─── Picked image type & security helpers ───────────────────────────────────
+
 export type PickedImage = {
   uri: string;
   base64?: string;
@@ -76,8 +140,7 @@ export type PickedImage = {
   fileSize?: number;
 };
 
-// Security constants for zero-trust document uploads
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 Megabytes max
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/jpg",
@@ -87,7 +150,10 @@ export const ALLOWED_MIME_TYPES = [
 ];
 
 export function validateDocumentSecurity(image: PickedImage): void {
-  if (image.mimeType && !ALLOWED_MIME_TYPES.includes(image.mimeType.toLowerCase())) {
+  if (
+    image.mimeType &&
+    !ALLOWED_MIME_TYPES.includes(image.mimeType.toLowerCase())
+  ) {
     throw new Error(
       `File format '${image.mimeType}' is not supported. Please upload a clear JPG, PNG, WEBP, or PDF.`,
     );
@@ -135,45 +201,6 @@ async function getImageBase64(image: PickedImage): Promise<string> {
   return image.base64 ?? encodeBase64(await getImageBuffer(image));
 }
 
-export const DOC_LABELS: Record<DocKind, { title: string; help: string }> = {
-  id_front: {
-    title: "ID document",
-    help: "The front of your SA ID card, or the photo page of your passport.",
-  },
-  id_back: {
-    title: "Back of ID",
-    help: "The reverse of your ID card. Skip this if you uploaded a passport.",
-  },
-  selfie: {
-    title: "Selfie",
-    help: "A clear photo of your face in good light, no hat or sunglasses.",
-  },
-  licence: {
-    title: "Driving licence",
-    help: "Both sides of your card licence. The expiry date must be readable.",
-  },
-  pdp: {
-    title: "Professional Driving Permit",
-    help: "Required by law to carry passengers for reward in South Africa.",
-  },
-  vehicle_registration: {
-    title: "Vehicle licence disc",
-    help: "The current disc on your windscreen, showing the registration number.",
-  },
-  roadworthy: {
-    title: "Roadworthy certificate",
-    help: "Proof the vehicle passed its roadworthy test.",
-  },
-  insurance: {
-    title: "Insurance certificate",
-    help: "Your current policy schedule, showing the insured vehicle.",
-  },
-  vehicle_photo: {
-    title: "Photo of your car",
-    help: "Taken from the front at an angle, with the number plate visible.",
-  },
-};
-
 // ─── Picking ─────────────────────────────────────────────────────────────────
 
 async function toPickedImage(
@@ -188,6 +215,7 @@ async function toPickedImage(
     uri: asset.uri,
     base64: asset.base64 ?? undefined,
     mimeType: asset.mimeType ?? "image/jpeg",
+    fileSize: asset.fileSize ?? undefined,
   };
 }
 
@@ -237,7 +265,6 @@ export async function uploadDocument(
   image: PickedImage,
   token: string,
 ): Promise<string> {
-  // POPIA & Zero-trust: Enforce file format and size limits before upload
   validateDocumentSecurity(image);
 
   const extension = image.mimeType.includes("png") ? "png" : "jpg";
@@ -271,6 +298,7 @@ export async function verifyDocumentAutomated(payload: {
     fullName?: string;
     vin?: string;
     pdpCategory?: string;
+    issueDate?: string;
   };
 }) {
   return fetchAPI("/(api)/verify-document", {
