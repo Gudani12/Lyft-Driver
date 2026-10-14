@@ -76,6 +76,56 @@ export const calculateRegion = ({
   };
 };
 
+export const getRideMapLocation = (ride: Record<string, unknown>) => {
+  const readCoordinate = (
+    value: unknown,
+    minimum: number,
+    maximum: number,
+  ): number | null => {
+    if (value == null || value === "") return null;
+    const coordinate = Number(value);
+    return Number.isFinite(coordinate) &&
+      coordinate >= minimum &&
+      coordinate <= maximum
+      ? coordinate
+      : null;
+  };
+  const latitude = readCoordinate(ride.origin_latitude, -90, 90);
+  const longitude = readCoordinate(ride.origin_longitude, -180, 180);
+
+  if (latitude == null || longitude == null) return null;
+
+  const destinationLatitude = readCoordinate(
+    ride.destination_latitude,
+    -90,
+    90,
+  );
+  const destinationLongitude = readCoordinate(
+    ride.destination_longitude,
+    -180,
+    180,
+  );
+  const hasDestination =
+    destinationLatitude != null && destinationLongitude != null;
+
+  return {
+    pickup: {
+      latitude,
+      longitude,
+      address:
+        typeof ride.origin_address === "string" ? ride.origin_address : null,
+    },
+    destination: {
+      latitude: hasDestination ? destinationLatitude : latitude,
+      longitude: hasDestination ? destinationLongitude : longitude,
+      address:
+        typeof ride.destination_address === "string"
+          ? ride.destination_address
+          : null,
+    },
+  };
+};
+
 export const decodePolyline = (encoded: string): Array<{ latitude: number; longitude: number }> => {
   if (!encoded) return [];
 

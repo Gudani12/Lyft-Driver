@@ -125,7 +125,9 @@ export default function Map({
           passengerLatitude != null &&
           passengerLongitude != null &&
           dropoffLatitude != null &&
-          dropoffLongitude != null
+          dropoffLongitude != null &&
+          (passengerLatitude !== dropoffLatitude ||
+            passengerLongitude !== dropoffLongitude)
             ? await fetchRouteCoordinates({
               originLatitude: passengerLatitude,
               originLongitude: passengerLongitude,

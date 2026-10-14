@@ -1,11 +1,54 @@
 import { fetchAPI } from "../lib/fetch";
-import { fetchRouteCoordinates } from "../lib/map";
+import { fetchRouteCoordinates, getRideMapLocation } from "../lib/map";
 
 jest.mock("../lib/fetch", () => ({
   fetchAPI: jest.fn(),
 }));
 
 const mockedFetchAPI = jest.mocked(fetchAPI);
+
+describe("getRideMapLocation", () => {
+  it("restores pickup and destination points from an active ride", () => {
+    expect(
+      getRideMapLocation({
+        origin_latitude: "-26.2",
+        origin_longitude: "28.0",
+        origin_address: "Pickup",
+        destination_latitude: -26.1,
+        destination_longitude: 28.1,
+        destination_address: "Drop-off",
+      }),
+    ).toEqual({
+      pickup: {
+        latitude: -26.2,
+        longitude: 28,
+        address: "Pickup",
+      },
+      destination: {
+        latitude: -26.1,
+        longitude: 28.1,
+        address: "Drop-off",
+      },
+    });
+  });
+
+  it("falls back to the pickup when a ride has no drop-off coordinates", () => {
+    expect(
+      getRideMapLocation({
+        origin_latitude: -26.2,
+        origin_longitude: 28,
+      }),
+    ).toEqual({
+      pickup: { latitude: -26.2, longitude: 28, address: null },
+      destination: { latitude: -26.2, longitude: 28, address: null },
+    });
+  });
+
+  it("rejects missing or invalid pickup coordinates", () => {
+    expect(getRideMapLocation({ origin_latitude: null, origin_longitude: 28 })).toBeNull();
+    expect(getRideMapLocation({ origin_latitude: 100, origin_longitude: 28 })).toBeNull();
+  });
+});
 
 describe("fetchRouteCoordinates", () => {
   afterEach(() => {

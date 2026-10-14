@@ -8,6 +8,7 @@ import { Alert, Animated, Pressable, Text, View } from "react-native";
 import Map from "@/components/Map";
 import { brand, ui } from "@/constants/theme";
 import { fetchAPI } from "@/lib/fetch";
+import { getRideMapLocation } from "@/lib/map";
 import { useLocationStore } from "@/store";
 
 const Home = () => {
@@ -24,6 +25,23 @@ const Home = () => {
     destination: { latitude: number; longitude: number; address?: string | null };
   } | null>(null);
   const popupTranslateY = useRef(new Animated.Value(0)).current;
+
+  const updateActiveRideLocation = useCallback(async (ride: any) => {
+    let location = getRideMapLocation(ride);
+
+    if (!location && ride?.origin_address) {
+      const geocoded = await Location.geocodeAsync(ride.origin_address);
+      if (geocoded?.[0]) {
+        location = getRideMapLocation({
+          ...ride,
+          origin_latitude: geocoded[0].latitude,
+          origin_longitude: geocoded[0].longitude,
+        });
+      }
+    }
+
+    setActiveRideLocation(location);
+  }, []);
 
   const loadDriverProfile = useCallback(async () => {
     if (!user?.id) return;
@@ -142,37 +160,11 @@ const Home = () => {
         return;
       }
 
-      const pickupLatitude =
-        activeRide.origin_latitude != null ? Number(activeRide.origin_latitude) : null;
-      const pickupLongitude =
-        activeRide.origin_longitude != null ? Number(activeRide.origin_longitude) : null;
-      const destinationLatitude =
-        activeRide.destination_latitude != null ? Number(activeRide.destination_latitude) : null;
-      const destinationLongitude =
-        activeRide.destination_longitude != null ? Number(activeRide.destination_longitude) : null;
-
-      if (pickupLatitude == null || pickupLongitude == null) {
-        setActiveRideLocation(null);
-        return;
-      }
-
-      const pickup = {
-        latitude: pickupLatitude,
-        longitude: pickupLongitude,
-        address: activeRide.origin_address ?? null,
-      };
-
-      const destination = {
-        latitude: destinationLatitude ?? pickupLatitude,
-        longitude: destinationLongitude ?? pickupLongitude,
-        address: activeRide.destination_address ?? null,
-      };
-
-      setActiveRideLocation({ pickup, destination });
+      await updateActiveRideLocation(activeRide);
     } catch (error) {
       console.warn("Unable to load incoming ride requests", error);
     }
-  }, [user?.id]);
+  }, [user?.id, updateActiveRideLocation]);
 
   useEffect(() => {
     void loadIncomingRequests();
@@ -241,42 +233,7 @@ const Home = () => {
       if (action === "accept") {
         const updatedRide = await fetchAPI(`/(api)/ride/${incomingRequest.ride_id}`);
         const ride = updatedRide?.data ?? incomingRequest;
-        const hasCoords = ride?.origin_latitude != null && ride?.origin_longitude != null;
-
-        if (hasCoords) {
-          setActiveRideLocation({
-            pickup: {
-              latitude: Number(ride.origin_latitude),
-              longitude: Number(ride.origin_longitude),
-              address: ride.origin_address ?? null,
-            },
-            destination: {
-              latitude:
-                ride.destination_latitude != null ? Number(ride.destination_latitude) : Number(ride.origin_latitude),
-              longitude:
-                ride.destination_longitude != null ? Number(ride.destination_longitude) : Number(ride.origin_longitude),
-              address: ride.destination_address ?? null,
-            },
-          });
-        } else if (ride?.origin_address) {
-          const geocoded = await Location.geocodeAsync(ride.origin_address);
-          if (geocoded?.[0]) {
-            setActiveRideLocation({
-              pickup: {
-                latitude: geocoded[0].latitude,
-                longitude: geocoded[0].longitude,
-                address: ride.origin_address,
-              },
-              destination: {
-                latitude:
-                  ride.destination_latitude != null ? Number(ride.destination_latitude) : geocoded[0].latitude,
-                longitude:
-                  ride.destination_longitude != null ? Number(ride.destination_longitude) : geocoded[0].longitude,
-                address: ride.destination_address ?? null,
-              },
-            });
-          }
-        }
+        await updateActiveRideLocation(ride);
       } else {
         setActiveRideLocation(null);
       }
