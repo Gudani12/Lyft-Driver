@@ -41,6 +41,7 @@ type Summary = {
   trips_this_week: number;
   earned_this_week: number;
   bank_account_last4?: string | null;
+  withdrawal_mode?: "request" | "simulation";
 };
 
 const STATUS = {
@@ -89,6 +90,7 @@ const Earnings = () => {
 
   const available = summary?.available ?? 0;
   const hasBank = Boolean(summary?.bank_account_last4);
+  const isMockWithdrawal = summary?.withdrawal_mode === "simulation";
 
   const requested = Number(amount) || 0;
   const amountError = useMemo(() => {
@@ -99,7 +101,7 @@ const Earnings = () => {
   }, [amount, requested, available]);
 
   const canWithdraw =
-    (hasBank || __DEV__) && !amountError && requested >= MIN_WITHDRAWAL;
+    (hasBank || isMockWithdrawal) && !amountError && requested >= MIN_WITHDRAWAL;
 
   const withdraw = async () => {
     if (!canWithdraw || !user?.id) return;
@@ -107,7 +109,7 @@ const Earnings = () => {
 
     try {
       const token = await getToken();
-      const isMock = __DEV__;
+      const isMock = isMockWithdrawal;
       await fetchAPI(
         isMock ? "/(api)/driver/mock-withdraw" : "/(api)/driver/withdraw",
         {
@@ -251,7 +253,7 @@ const Earnings = () => {
                     : "No bank account added"}
                 </Text>
                 <Text className="mt-0.5 text-[12px] font-Jakarta text-[#746A7E]">
-                  {__DEV__
+                  {isMockWithdrawal
                     ? "Bank account not needed for test simulation"
                     : hasBank
                       ? "Payouts are sent here"
@@ -347,14 +349,14 @@ const Earnings = () => {
               </Text>
               <Text className="mt-1 text-[13px] font-Jakarta text-[#746A7E]">
                 R{available.toFixed(2)} available
-                {__DEV__
+                {isMockWithdrawal
                   ? " · simulation only"
                   : hasBank
                     ? ` · account ending ${summary?.bank_account_last4}`
                     : ""}
               </Text>
 
-              {__DEV__ && (
+              {isMockWithdrawal && (
                 <Text className="mt-2 text-[12px] font-JakartaMedium text-[#D99A1B]">
                   Test simulation only. No money will be transferred.
                 </Text>
@@ -394,7 +396,7 @@ const Earnings = () => {
                 </View>
               )}
 
-              {!hasBank && !__DEV__ && (
+              {!hasBank && !isMockWithdrawal && (
                 <View className="mt-3 flex-row gap-2 rounded-2xl bg-[#FFF6E5] p-3.5">
                   <Ionicons name="warning-outline" size={15} color="#D99A1B" />
                   <Text className="flex-1 text-[11.5px] font-Jakarta leading-4 text-[#D99A1B]">
@@ -407,7 +409,7 @@ const Earnings = () => {
               <View className="mt-4 flex-row gap-2.5 rounded-2xl border border-[#E9E2F0] p-4">
                 <Ionicons name="time-outline" size={15} color="#5A189A" />
                 <Text className="flex-1 text-[11.5px] font-Jakarta leading-4 text-[#746A7E]">
-                  {__DEV__
+                  {isMockWithdrawal
                     ? "This test simulation changes the app balance only. No payment is sent."
                     : "Your request will be reviewed before payout and will appear in your withdrawal history."}
                 </Text>
@@ -417,10 +419,10 @@ const Earnings = () => {
                 <CustomButton
                   title={
                     submitting
-                      ? __DEV__
+                      ? isMockWithdrawal
                         ? "Simulating…"
                         : "Requesting…"
-                      : __DEV__
+                      : isMockWithdrawal
                         ? `Simulate R${requested || 0} withdrawal`
                         : `Withdraw R${requested || 0}`
                   }

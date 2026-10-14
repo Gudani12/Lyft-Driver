@@ -51,7 +51,44 @@ describe('driver/earnings API route', () => {
     const body = await response.json();
     expect(body.data.summary.available).toBe(0);
     expect(body.data.summary.lifetime).toBe(0);
+    expect(body.data.summary.withdrawal_mode).toBe('simulation');
     expect(body.data.payouts).toEqual([]);
+  });
+
+  it('reports request withdrawals when the API runs in production', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      const from = jest.fn(() => {
+        const chain: any = {};
+        chain.select = jest.fn().mockReturnValue(chain);
+        chain.eq = jest.fn().mockReturnValue(chain);
+        chain.maybeSingle = jest.fn().mockResolvedValue({
+          data: null,
+          error: null,
+        });
+        return chain;
+      });
+
+      setupSupabase({ from });
+
+      const { GET } = require('../../app/(api)/driver/earnings+api');
+      const request = new Request(
+        'https://example.com/api/driver/earnings?clerkId=clerk_new',
+        { method: 'GET' },
+      );
+      const response = await GET(request);
+      const body = await response.json();
+
+      expect(body.data.summary.withdrawal_mode).toBe('request');
+    } finally {
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
   });
 
   it('INT-EARN-03: GET computes earnings from completed rides minus payouts', async () => {

@@ -163,6 +163,10 @@ export async function PATCH(request: Request, { id }: { id: string }) {
 
     const current = existing.status ?? "booked";
 
+    if (current === transition.to) {
+      return Response.json({ data: existing });
+    }
+
     if (!transition.from.includes(current)) {
       return Response.json(
         {

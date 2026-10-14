@@ -11,7 +11,11 @@ export const getApiUrl = (url: string) => {
   return new URL(endpoint, `${API_ORIGIN}/`).toString();
 };
 
-export const fetchAPI = async (url: string, options?: RequestInit) => {
+export const fetchAPI = async (
+  url: string,
+  options?: RequestInit,
+  { logErrors = true }: { logErrors?: boolean } = {},
+) => {
   try {
     const response = await fetch(getApiUrl(url), options);
     if (!response.ok) {
@@ -32,7 +36,9 @@ export const fetchAPI = async (url: string, options?: RequestInit) => {
     }
     return await response.json();
   } catch (error) {
-    console.warn("Fetch error:", error);
+    if (logErrors) {
+      console.warn("Fetch error:", error);
+    }
     throw error;
   }
 };

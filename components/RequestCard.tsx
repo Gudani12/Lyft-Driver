@@ -136,19 +136,33 @@ const RequestCard = ({ ride, onChanged }: Props) => {
       }
       // Note the (api) group in the path. A bare /api/... resolves to nothing
       // in expo-router and fails silently.
-      await fetchAPI(`/(api)/ride/${rideId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
+      await fetchAPI(
+        `/(api)/ride/${rideId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ action }),
         },
-        body: JSON.stringify({ action }),
-      });
+        { logErrors: false },
+      );
 
       if (refreshAfterSuccess) onChanged?.();
       return true;
     } catch (error: any) {
+      if (
+        action === "start" &&
+        error?.message === 'Can\'t start a ride that is "in_progress"'
+      ) {
+        setStatus("in_progress");
+        onChanged?.();
+        return true;
+      }
+
       setStatus(previous);
+      console.warn("Unable to update ride", error);
       Alert.alert(
         "Couldn't update",
         error?.message ?? "Please check your connection and try again.",

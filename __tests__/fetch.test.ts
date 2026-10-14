@@ -38,4 +38,23 @@ describe("fetchAPI", () => {
       undefined,
     );
   });
+
+  it("can leave expected request failures to the caller without logging", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: 'Can\'t start a ride that is "in_progress"' }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      fetchAPI("/(api)/ride/ride_123", { method: "PATCH" }, { logErrors: false }),
+    ).rejects.toThrow('Can\'t start a ride that is "in_progress"');
+
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
