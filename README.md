@@ -97,6 +97,9 @@ Set the following values in the Render service's environment settings:
 - `GEOAPIFY_API_KEY` — used by Render for autocomplete and static map previews.
 - `GOOGLE_MAPS_API_KEY` — optional server-side Directions API key; routing falls
   back to OSRM if it is not configured.
+- `MOCK_WITHDRAWAL_CLERK_IDS` — optional comma-separated Clerk user IDs allowed
+  to use simulated withdrawals in production for testing. Leave unset to keep
+  simulations disabled for production accounts.
 - Supabase, Stripe, Didit, and webhook credentials required by the API routes.
 
 The native Google Maps SDK key is configured in `app.json` because iOS/Android

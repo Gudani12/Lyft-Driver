@@ -1,10 +1,26 @@
 describe('driver/mock-withdraw API route', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalMockWithdrawalIds = process.env.MOCK_WITHDRAWAL_CLERK_IDS;
+
   afterEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    if (originalMockWithdrawalIds === undefined) {
+      delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
+    } else {
+      process.env.MOCK_WITHDRAWAL_CLERK_IDS = originalMockWithdrawalIds;
+    }
   });
 
-  it('records a clearly marked simulation against the authenticated driver balance', async () => {
+  it('allows an explicitly allowlisted test account to simulate a withdrawal in production', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.MOCK_WITHDRAWAL_CLERK_IDS = 'clerk_driver';
+
     const insert = jest.fn().mockReturnValue({
       select: jest.fn().mockReturnValue({
         single: jest.fn().mockResolvedValue({
@@ -62,5 +78,30 @@ describe('driver/mock-withdraw API route', () => {
       is_mock: true,
     });
     expect(body.data.is_mock).toBe(true);
+  });
+
+  it('keeps production simulations disabled for accounts outside the allowlist', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.MOCK_WITHDRAWAL_CLERK_IDS;
+
+    const getSupabaseServerClient = jest.fn();
+    jest.doMock('../../lib/server-auth', () => ({
+      requireClerkUser: jest.fn().mockResolvedValue('clerk_driver'),
+    }));
+    jest.doMock('../../lib/supabase-server', () => ({
+      getSupabaseServerClient,
+    }));
+
+    const { POST } = require('../../app/(api)/driver/mock-withdraw+api');
+    const request = new Request('https://example.com/api/driver/mock-withdraw', {
+      method: 'POST',
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe('Mock withdrawals are disabled in production');
+    expect(getSupabaseServerClient).not.toHaveBeenCalled();
   });
 });

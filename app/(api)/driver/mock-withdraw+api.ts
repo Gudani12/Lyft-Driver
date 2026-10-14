@@ -1,5 +1,6 @@
 import { requireClerkUser } from "@/lib/server-auth";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { isMockWithdrawalEnabled } from "@/lib/withdrawals";
 
 const MIN_WITHDRAWAL = 50;
 const COMMISSION = 0.1;
@@ -7,14 +8,14 @@ const CLEARING_HOURS = 24;
 
 export async function POST(request: Request) {
   try {
-    if (process.env.NODE_ENV === "production") {
+    const clerkId = await requireClerkUser(request);
+    if (!isMockWithdrawalEnabled(clerkId)) {
       return Response.json(
         { error: "Mock withdrawals are disabled in production" },
         { status: 404 },
       );
     }
 
-    const clerkId = await requireClerkUser(request);
     const body = await request.json();
     const amount = Number(body?.amount);
 

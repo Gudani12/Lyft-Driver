@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { getWithdrawalMode } from "@/lib/withdrawals";
 
 // Balance model:
 //   gross     = fares of completed trips
@@ -8,8 +9,6 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 
 const COMMISSION = 0.1;
 const CLEARING_HOURS = 24;
-const WITHDRAWAL_MODE =
-  process.env.NODE_ENV === "production" ? "request" : "simulation";
 
 export async function GET(request: Request) {
   try {
@@ -19,6 +18,7 @@ export async function GET(request: Request) {
     if (!clerkId) {
       return Response.json({ error: "Missing clerkId" }, { status: 400 });
     }
+    const withdrawalMode = getWithdrawalMode(clerkId);
 
     const supabase = await getSupabaseServerClient();
 
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
         trips_this_week: 0,
         earned_this_week: 0,
         bank_account_last4: bankLast4,
-        withdrawal_mode: WITHDRAWAL_MODE,
+        withdrawal_mode: withdrawalMode,
       },
       payouts: [],
     };
@@ -103,7 +103,7 @@ export async function GET(request: Request) {
           trips_this_week: tripsThisWeek,
           earned_this_week: earnedThisWeek,
           bank_account_last4: bankLast4,
-          withdrawal_mode: WITHDRAWAL_MODE,
+          withdrawal_mode: withdrawalMode,
         },
         payouts: payoutRows.data ?? [],
       },
