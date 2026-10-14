@@ -1,7 +1,7 @@
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -295,6 +295,76 @@ function VerificationChecklistRow({
   );
 }
 
+function ProfileSectionHeading({
+  title,
+  subtitle,
+  icon,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}) {
+  return (
+    <View className="mb-3 mt-1 flex-row items-center gap-3">
+      <View className="h-9 w-9 items-center justify-center rounded-xl bg-[#F0E6FA]">
+        <Ionicons name={icon} size={17} color="#5A189A" />
+      </View>
+      <View className="min-w-0 flex-1">
+        <Text className="text-[16px] font-JakartaExtraBold leading-5 text-[#21152F]">
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text className="mt-0.5 text-[11.5px] font-JakartaMedium leading-4 text-[#746A7E]">
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function ProfileAccordion({
+  title,
+  icon,
+  expanded,
+  onPress,
+  children,
+}: {
+  title: string;
+  icon: IoniconName;
+  expanded: boolean;
+  onPress: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <View className="mb-3 overflow-hidden rounded-[28px] border border-[#E9E2F0] bg-white shadow-sm">
+      <TouchableOpacity
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        className="min-h-[82px] flex-row items-center gap-4 px-4 py-4 active:bg-[#FCFAFE]"
+      >
+        <View className="h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#F0E6FA]">
+          <Ionicons name={icon} size={25} color="#5A189A" />
+        </View>
+        <Text className="min-w-0 flex-1 text-[18px] font-JakartaExtraBold leading-6 text-[#21152F]">
+          {title}
+        </Text>
+        <Ionicons
+          name={expanded ? "chevron-up" : "chevron-down"}
+          size={24}
+          color="#746A7E"
+        />
+      </TouchableOpacity>
+      {expanded ? (
+        <View className="border-t border-[#F0E6FA] px-4 pb-4 pt-4">
+          {children}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const Profile = () => {
   const { user } = useUser();
   const { getToken, signOut } = useAuth();
@@ -305,6 +375,7 @@ const Profile = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [savingPhoto, setSavingPhoto] = useState(false);
   const [savingDocKind, setSavingDocKind] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   // Modals & Sheets
   const [activePhotoType, setActivePhotoType] = useState<"avatar" | "vehicle" | null>(null);
@@ -340,6 +411,13 @@ const Profile = () => {
     setRefreshing(true);
     load();
   }, [load]);
+
+  const toggleSection = (section: string) => {
+    setExpandedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  };
 
   // Derived records
   const vehicle = profile?.vehicle ?? {};
@@ -738,6 +816,10 @@ const Profile = () => {
               </View>
             </View>
 
+            <ProfileSectionHeading
+              title="Profile overview"
+              icon="stats-chart-outline"
+            />
             <View className="mb-6 flex-row gap-2.5">
               <ProfileMetricCard
                 icon="star-outline"
@@ -756,11 +838,11 @@ const Profile = () => {
               />
             </View>
 
-            <View className="mb-7 rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
+            <View className="mb-5 rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
               <View className="flex-row items-start justify-between gap-3">
                 <View className="min-w-0 flex-1">
                   <Text className="text-[17px] font-JakartaExtraBold leading-6 text-[#21152F]">
-                    Verification progress
+                    Complete your verification
                   </Text>
                   <Text className="mt-1 text-[12px] font-Jakarta leading-[18px] text-[#746A7E]">
                     {verifiedRequirements} of {verificationItems.length} required checks verified
@@ -780,7 +862,18 @@ const Profile = () => {
                   style={{ width: `${verificationProgress}%` }}
                 />
               </View>
-              <View className="mt-2">
+            </View>
+
+            <ProfileAccordion
+              title="Identity & security"
+              icon="shield-checkmark-outline"
+              expanded={Boolean(expandedSections.identity)}
+              onPress={() => toggleSection("identity")}
+            >
+              <View>
+                <Text className="mb-1 mt-2 text-[13px] font-JakartaExtraBold text-[#5A189A]">
+                  Identity & driving checks
+                </Text>
                 {verificationItems.slice(0, 2).map((item) => (
                   <VerificationChecklistRow
                     key={item.title}
@@ -789,8 +882,8 @@ const Profile = () => {
                   />
                 ))}
               </View>
-              <View className="mt-4">
-                <Text className="text-[15px] font-JakartaExtraBold leading-5 text-[#21152F]">
+              <View className="mb-2 mt-4">
+                <Text className="text-[13px] font-JakartaExtraBold leading-5 text-[#5A189A]">
                   Permits & vehicle documents
                 </Text>
                 <Text className="mt-0.5 text-[12px] font-JakartaMedium leading-[18px] text-[#746A7E]">
@@ -818,11 +911,61 @@ const Profile = () => {
                 </Text>
                 <Ionicons name="arrow-forward" size={15} color="#5A189A" />
               </TouchableOpacity>
-            </View>
+            </ProfileAccordion>
 
+            <ProfileAccordion
+              title="Personal information"
+              icon="person-outline"
+              expanded={Boolean(expandedSections.personal)}
+              onPress={() => toggleSection("personal")}
+            >
+              <SectionCard
+                title="Full Name"
+                value={displayName}
+                icon="person-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(root)/edit-profile",
+                    params: { field: "name", label: "Full Name" },
+                  })
+                }
+              />
+              <SectionCard
+                title="Email"
+                value={emailAddress}
+                icon="mail-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(root)/edit-profile",
+                    params: { field: "email", label: "Email" },
+                  })
+                }
+              />
+              <SectionCard
+                title="Emergency Contact (ICE)"
+                value={
+                  profile?.profile_data?.emergency_contact?.trim() ||
+                  "Not added"
+                }
+                icon="heart-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(root)/edit-profile",
+                    params: { field: "emergency_contact", label: "Emergency Contact" },
+                  })
+                }
+              />
+            </ProfileAccordion>
+
+            <ProfileAccordion
+              title="Ride preferences"
+              icon="car-sport-outline"
+              expanded={Boolean(expandedSections.preferences)}
+              onPress={() => toggleSection("preferences")}
+            >
             <View className="mb-3 flex-row items-start justify-between gap-3">
-              <Text className="min-w-0 flex-1 text-[17px] font-JakartaExtraBold leading-6 text-[#21152F]">
-                Vehicle information
+              <Text className="min-w-0 flex-1 text-[14px] font-JakartaExtraBold leading-5 text-[#21152F]">
+                Vehicle details
               </Text>
               <TouchableOpacity
                 onPress={() => router.push("/(root)/vehicle-details")}
@@ -902,8 +1045,8 @@ const Profile = () => {
 
             {/* RIDE AMENITIES */}
             <View className="mb-3 flex-row items-center justify-between">
-              <Text className="text-[17px] font-JakartaExtraBold text-[#21152F]">
-                Ride Amenities
+              <Text className="text-[14px] font-JakartaExtraBold text-[#21152F]">
+                Ride amenities
               </Text>
               <Text className="text-[11.5px] font-JakartaMedium text-[#A69BAF]">
                 Tap to toggle
@@ -946,16 +1089,26 @@ const Profile = () => {
               })}
             </View>
 
-            <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
-              Driving, earnings & payouts
-            </Text>
-            <View className="mb-7">
+            </ProfileAccordion>
+
+            <ProfileAccordion
+              title="Trips"
+              icon="car-outline"
+              expanded={Boolean(expandedSections.trips)}
+              onPress={() => toggleSection("trips")}
+            >
+              <Text className="mb-2 mt-1 text-[13px] font-JakartaExtraBold text-[#5A189A]">
+                Driving
+              </Text>
               <SectionCard
                 title="Offer a Trip"
                 value="Publish available seats for passengers"
                 icon="add-circle-outline"
                 onPress={() => router.push("/(root)/create-trip")}
               />
+              <Text className="mb-2 mt-2 text-[13px] font-JakartaExtraBold text-[#5A189A]">
+                Earnings & payouts
+              </Text>
               <SectionCard
                 title="Earnings & Payouts"
                 value="Balance, payouts and transaction history"
@@ -972,12 +1125,14 @@ const Profile = () => {
                 icon="business-outline"
                 onPress={() => router.push("/(root)/bank-details")}
               />
-            </View>
+            </ProfileAccordion>
 
-            <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
-              Driver support
-            </Text>
-            <View className="mb-7">
+            <ProfileAccordion
+              title="Support"
+              icon="help-circle-outline"
+              expanded={Boolean(expandedSections.support)}
+              onPress={() => toggleSection("support")}
+            >
               <SectionCard
                 title="Help & Support"
                 value="Browse driver help topics or chat with AI support"
@@ -996,48 +1151,14 @@ const Profile = () => {
                 icon="mail-outline"
                 onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
               />
-            </View>
+            </ProfileAccordion>
 
-            <Text className="mb-3 text-[17px] font-JakartaExtraBold text-[#21152F]">
-              Account & personal information
-            </Text>
-            <View className="mb-7">
-              <SectionCard
-                title="Full Name"
-                value={displayName}
-                icon="person-outline"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(root)/edit-profile",
-                    params: { field: "name", label: "Full Name" },
-                  })
-                }
-              />
-              <SectionCard
-                title="Email"
-                value={emailAddress}
-                icon="mail-outline"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(root)/edit-profile",
-                    params: { field: "email", label: "Email" },
-                  })
-                }
-              />
-              <SectionCard
-                title="Emergency Contact (ICE)"
-                value={
-                  profile?.profile_data?.emergency_contact?.trim() ||
-                  "Not added"
-                }
-                icon="heart-outline"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(root)/edit-profile",
-                    params: { field: "emergency_contact", label: "Emergency Contact" },
-                  })
-                }
-              />
+            <ProfileAccordion
+              title="Account & sign out"
+              icon="person-circle-outline"
+              expanded={Boolean(expandedSections.account)}
+              onPress={() => toggleSection("account")}
+            >
               <SectionCard
                 title="Sign Out"
                 value="Log out of driver account"
@@ -1045,7 +1166,7 @@ const Profile = () => {
                 tone="danger"
                 onPress={handleSignOut}
               />
-            </View>
+            </ProfileAccordion>
 
             <View className="mb-8 items-center">
               <Text className="text-[12px] font-JakartaBold text-[#A69BAF]">
