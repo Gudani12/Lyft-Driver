@@ -49,25 +49,38 @@ export async function GET(request: Request) {
 
     const driverVerificationStatus = resolveDriverVerificationStatus(profile);
     let vehicle = profile?.profile_data?.vehicle ?? null;
+    let completedTrips = profile?.total_trips ?? 0;
 
     if (profile) {
-      const { data: storedVehicle, error: vehicleError } = await supabase
-        .from("driver_vehicles")
-        .select("make, model, year, colour, plate, seats")
-        .eq("driver_id", profile.id)
-        .maybeSingle();
+      const [vehicleResult, completedTripsResult] = await Promise.all([
+        supabase
+          .from("driver_vehicles")
+          .select("make, model, year, colour, plate, seats")
+          .eq("driver_id", profile.id)
+          .maybeSingle(),
+        supabase
+          .from("rides")
+          .select("ride_id", { count: "exact", head: true })
+          .eq("driver_id", profile.id)
+          .eq("status", "completed"),
+      ]);
 
       if (
-        vehicleError &&
-        ["42P01", "PGRST205"].includes(String(vehicleError.code))
+        vehicleResult.error &&
+        ["42P01", "PGRST205"].includes(String(vehicleResult.error.code))
       ) {
         console.warn(
           "Driver vehicles table is not installed yet; using legacy vehicle data.",
         );
-      } else if (vehicleError) {
-        throw vehicleError;
+      } else if (vehicleResult.error) {
+        throw vehicleResult.error;
       }
-      if (storedVehicle) vehicle = storedVehicle;
+      if (vehicleResult.data) vehicle = vehicleResult.data;
+
+      if (completedTripsResult.error) {
+        throw completedTripsResult.error;
+      }
+      completedTrips = completedTripsResult.count ?? 0;
     }
 
     if (
@@ -124,6 +137,7 @@ export async function GET(request: Request) {
         ? {
             ...profile,
             rating: driverRating === null ? null : Number(driverRating.toFixed(2)),
+            total_trips: completedTrips,
             vehicle,
             name:
               profile.full_name ||

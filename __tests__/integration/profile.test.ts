@@ -116,14 +116,24 @@ describe('profile API route', () => {
     vehicleQuery.eq = jest.fn().mockReturnValue(vehicleQuery);
     vehicleQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
 
+    const ridesQuery: any = {};
+    ridesQuery.select = jest.fn().mockReturnValue(ridesQuery);
+    ridesQuery.eq = jest
+      .fn()
+      .mockReturnValueOnce(ridesQuery)
+      .mockResolvedValueOnce({ count: 17, error: null });
+
     const ratingsQuery: any = {};
     ratingsQuery.select = jest.fn().mockReturnValue(ratingsQuery);
     ratingsQuery.eq = jest.fn().mockResolvedValue({ data: [], error: null });
 
     setupSupabase({
-      from: jest.fn((table: string) =>
-        table === 'drivers' ? driverQuery : table === 'driver_vehicles' ? vehicleQuery : ratingsQuery,
-      ),
+      from: jest.fn((table: string) => {
+        if (table === 'drivers') return driverQuery;
+        if (table === 'driver_vehicles') return vehicleQuery;
+        if (table === 'rides') return ridesQuery;
+        return ratingsQuery;
+      }),
     });
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -137,6 +147,13 @@ describe('profile API route', () => {
 
     expect(response.status).toBe(200);
     expect(body.data.name).toBe('Sipho Dlamini');
+    expect(body.data.total_trips).toBe(17);
+    expect(ridesQuery.select).toHaveBeenCalledWith('ride_id', {
+      count: 'exact',
+      head: true,
+    });
+    expect(ridesQuery.eq).toHaveBeenNthCalledWith(1, 'driver_id', 'driver_1');
+    expect(ridesQuery.eq).toHaveBeenNthCalledWith(2, 'status', 'completed');
   });
 
   it('INT-PROFILE-06: GET does not invent a default rating when none is recorded', async () => {
@@ -161,14 +178,24 @@ describe('profile API route', () => {
     vehicleQuery.eq = jest.fn().mockReturnValue(vehicleQuery);
     vehicleQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
 
+    const ridesQuery: any = {};
+    ridesQuery.select = jest.fn().mockReturnValue(ridesQuery);
+    ridesQuery.eq = jest
+      .fn()
+      .mockReturnValueOnce(ridesQuery)
+      .mockResolvedValueOnce({ count: 0, error: null });
+
     const ratingsQuery: any = {};
     ratingsQuery.select = jest.fn().mockReturnValue(ratingsQuery);
     ratingsQuery.eq = jest.fn().mockResolvedValue({ data: [], error: null });
 
     setupSupabase({
-      from: jest.fn((table: string) =>
-        table === 'drivers' ? driverQuery : table === 'driver_vehicles' ? vehicleQuery : ratingsQuery,
-      ),
+      from: jest.fn((table: string) => {
+        if (table === 'drivers') return driverQuery;
+        if (table === 'driver_vehicles') return vehicleQuery;
+        if (table === 'rides') return ridesQuery;
+        return ratingsQuery;
+      }),
     });
 
     // Load the route after installing the mocked Supabase client.
@@ -207,6 +234,13 @@ describe('profile API route', () => {
     vehicleQuery.eq = jest.fn().mockReturnValue(vehicleQuery);
     vehicleQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
 
+    const ridesQuery: any = {};
+    ridesQuery.select = jest.fn().mockReturnValue(ridesQuery);
+    ridesQuery.eq = jest
+      .fn()
+      .mockReturnValueOnce(ridesQuery)
+      .mockResolvedValueOnce({ count: 0, error: null });
+
     const ratingsQuery: any = {};
     ratingsQuery.select = jest.fn().mockReturnValue(ratingsQuery);
     ratingsQuery.eq = jest.fn().mockResolvedValue({
@@ -215,9 +249,12 @@ describe('profile API route', () => {
     });
 
     setupSupabase({
-      from: jest.fn((table: string) =>
-        table === 'drivers' ? driverQuery : table === 'driver_vehicles' ? vehicleQuery : ratingsQuery,
-      ),
+      from: jest.fn((table: string) => {
+        if (table === 'drivers') return driverQuery;
+        if (table === 'driver_vehicles') return vehicleQuery;
+        if (table === 'rides') return ridesQuery;
+        return ratingsQuery;
+      }),
     });
 
     // Load the route after installing the mocked Supabase client.
