@@ -1,10 +1,10 @@
 {
   "expo": {
     "name": "Lyft Driver",
-    "slug": "lyft-driver",
+    "slug": "hopon-driver",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/hopon.logo.png",
+    "icon": "./assets/images/hopon.logo.square.png",
     "scheme": "lyft-driver",
     "userInterfaceStyle": "automatic",
 
@@ -16,13 +16,13 @@
     },
 
     "android": {
+      "package": "com.hopon.driver",
       "adaptiveIcon": {
         "backgroundColor": "#1D1135",
-        "foregroundImage": "./assets/images/hopon.apk.logo.png",
+        "foregroundImage": "./assets/images/hopon.apk.logo.square.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "config": {
         "googleMaps": {
@@ -57,6 +57,8 @@
       ],
       "expo-secure-store",
       "expo-image-picker",
+      "@didit-protocol/sdk-react-native",
+      "./plugins/withAndroidBackupRulesManifest",
       [
         "@stripe/stripe-react-native",
         {
@@ -73,7 +75,7 @@
 
     "extra": {
       "eas": {
-        "projectId": "d3982bc5-8411-4520-b271-5271fad8d96a"
+        "projectId": "d17b3869-d9fb-4162-ab98-5f753caecf0c"
       }
     }
   }
