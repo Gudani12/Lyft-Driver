@@ -6,24 +6,23 @@ import crypto from "node:crypto";
 // ─────────────────────────────────────────────────────────────────────────────
 const KYC_WORKFLOW_ID = "57368fe7-f4dc-487f-bebe-981305685d81";
 
-// Document AI workflows (one per document kind)
+// Document AI workflows — one per document kind.
+// Keep in sync with document-ai-session+api.ts.
 const DOCUMENT_AI_WORKFLOW_IDS: Record<string, string> = {
-  pdp: "REPLACE_WITH_PDP_WORKFLOW_ID",
-  police_clearance: "REPLACE_WITH_POLICE_CLEARANCE_WORKFLOW_ID",
-  vehicle_registration: "REPLACE_WITH_VEHICLE_REGISTRATION_WORKFLOW_ID",
-  operating_card: "REPLACE_WITH_OPERATING_CARD_WORKFLOW_ID",
-  operating_licence: "REPLACE_WITH_OPERATING_LICENCE_WORKFLOW_ID",
-  roadworthy: "REPLACE_WITH_ROADWORTHY_WORKFLOW_ID",
-  insurance: "REPLACE_WITH_INSURANCE_WORKFLOW_ID",
+  pdp: "612dcc07-670a-4488-9e9b-c890e011d1a1",
+  police_clearance: "177437aa-f884-4cf0-a9fd-d8ff8da4c612",
+  vehicle_registration: "f5c186c0-5626-4630-b9aa-72abb08a2a55",
+  operating_card: "9dc415f5-e338-457e-a4e4-9c1406466d64",
+  operating_licence: "114a3641-1cc8-48c3-bce6-c6723a710725",
+  roadworthy: "a9476bdf-b029-47b0-babd-0d57b1911102",
+  insurance: "e271301f-ebed-4a01-8f33-837bddb40037",
 };
 
-// Reverse map: workflow ID → doc kind
 const WORKFLOW_ID_TO_DOC_KIND: Record<string, string> = Object.fromEntries(
   Object.entries(DOCUMENT_AI_WORKFLOW_IDS).map(([kind, id]) => [id, kind]),
 );
 
-// Required number of extracted fields per doc kind.
-// If Didit returns fewer fields than this, we refuse to mark the doc verified.
+// Minimum number of extracted fields required for a document to be marked verified.
 const MIN_FIELD_COUNT: Record<string, number> = {
   pdp: 3,
   police_clearance: 3,
@@ -116,10 +115,11 @@ export async function POST(request: Request) {
 
     const supabase = await getSupabaseServerClient();
 
-    // Route based on workflow
     const isKyc = workflowId === KYC_WORKFLOW_ID;
     const isDocumentAI =
-      workflowId && workflowId in WORKFLOW_ID_TO_DOC_KIND;
+      (workflowId && workflowId in WORKFLOW_ID_TO_DOC_KIND) ||
+      (typeof metadata?.docKind === "string" &&
+        metadata.docKind in DOCUMENT_AI_WORKFLOW_IDS);
 
     if (isDocumentAI) {
       await handleDocumentAIWebhook({
@@ -127,7 +127,7 @@ export async function POST(request: Request) {
         clerkId,
         status,
         decision,
-        workflowId: workflowId!,
+        workflowId: workflowId ?? "",
         metadata,
       });
     } else if (isKyc) {
@@ -182,10 +182,10 @@ async function handleKYCWebhook({
         if (firstId.document_number) update.id_number = firstId.document_number;
         if (firstId.first_name) update.first_name = firstId.first_name;
         if (firstId.last_name) update.last_name = firstId.last_name;
-        if (firstId.date_of_birth) update.date_of_birth = firstId.date_of_birth;
+        if (firstId.date_of_birth)
+          update.date_of_birth = firstId.date_of_birth;
       }
 
-      // Recompute overall driver status
       const { data: current } = await supabase
         .from("drivers")
         .select("licence_verified, profile_data")
@@ -220,7 +220,8 @@ async function handleKYCWebhook({
     case "Declined": {
       update.driver_verification_status = "rejected";
       update.driver_rejection_reason =
-        decision?.reviews?.[0]?.comment ?? "Identity verification was declined.";
+        decision?.reviews?.[0]?.comment ??
+        "Identity verification was declined.";
       break;
     }
 
@@ -279,7 +280,7 @@ async function handleDocumentAIWebhook({
     return;
   }
 
-  // ── Extract fields from whatever shape Didit sent ─────────────────────
+  // Extract fields from the Didit decision shape
   const documentAiResults =
     decision?.document_ai_results ??
     decision?.document_ai ??
@@ -290,7 +291,6 @@ async function handleDocumentAIWebhook({
     ? documentAiResults
     : [documentAiResults];
 
-  // Find the first non-empty fields bag
   let extractedFields: Record<string, any> | null = null;
 
   for (const result of rawResults) {
@@ -307,16 +307,13 @@ async function handleDocumentAIWebhook({
     }
   }
 
-  // Fallback: check the top-level decision for a flat fields object
   if (!extractedFields) {
-    const topLevel =
-      decision?.extracted_fields ?? decision?.fields ?? null;
+    const topLevel = decision?.extracted_fields ?? decision?.fields ?? null;
     if (topLevel && typeof topLevel === "object") {
       extractedFields = topLevel;
     }
   }
 
-  // If still nothing, treat the whole decision as fields for debug purposes
   if (!extractedFields) {
     extractedFields = {};
   }
@@ -328,10 +325,7 @@ async function handleDocumentAIWebhook({
     `didit-webhook (DocumentAI): docKind=${docKind} status=${status} fieldCount=${fieldCount} minRequired=${minRequired}`,
   );
 
-  // ── Decide the status ──────────────────────────────────────────────────
-  // Only mark verified if:
-  //  - Didit returned Approved
-  //  - We got at least the minimum number of fields for this document
+  // Decide the status
   let docStatus: string;
   let failureReason: string | null = null;
 
@@ -342,15 +336,12 @@ async function handleDocumentAIWebhook({
     failureReason =
       decision?.reviews?.[0]?.comment ?? "Didit declined the document.";
   } else if (status === "Approved" && fieldCount < minRequired) {
-    // Didit said Approved but it extracted almost nothing —
-    // likely the wrong image. Treat as failed.
     docStatus = "failed";
     failureReason = `Could not read the required fields from the uploaded image. Please upload a clear photo of your ${docKind.replace(/_/g, " ")}.`;
   } else {
     docStatus = "pending_review";
   }
 
-  // ── Persist ────────────────────────────────────────────────────────────
   const { data: driver, error: lookupError } = await supabase
     .from("drivers")
     .select(
@@ -387,7 +378,6 @@ async function handleDocumentAIWebhook({
     },
   };
 
-  // Recompute overall driver verification status
   const REQUIRED = [
     "pdp",
     "police_clearance",

@@ -1,22 +1,15 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // One workflow per document type.
-// Create these in Didit Console → Workflows → New workflow.
-// Each workflow should contain ONE Document AI step with only the fields
-// for that specific document type.
-//
-// REPLACE every placeholder below with the actual workflow IDs
-// from the Didit Console.
-// ─────────────────────────────────────────────────────────────────────────────
+// From Didit Console → Workflows.
 const WORKFLOW_IDS: Record<string, string> = {
-    pdp: "REPLACE_WITH_PDP_WORKFLOW_ID",
-    police_clearance: "REPLACE_WITH_POLICE_CLEARANCE_WORKFLOW_ID",
-    vehicle_registration: "REPLACE_WITH_VEHICLE_REGISTRATION_WORKFLOW_ID",
-    operating_card: "REPLACE_WITH_OPERATING_CARD_WORKFLOW_ID",
-    operating_licence: "REPLACE_WITH_OPERATING_LICENCE_WORKFLOW_ID",
-    roadworthy: "REPLACE_WITH_ROADWORTHY_WORKFLOW_ID",
-    insurance: "REPLACE_WITH_INSURANCE_WORKFLOW_ID",
+    pdp: "612dcc07-670a-4488-9e9b-c890e011d1a1",
+    police_clearance: "177437aa-f884-4cf0-a9fd-d8ff8da4c612",
+    vehicle_registration: "f5c186c0-5626-4630-b9aa-72abb08a2a55",
+    operating_card: "9dc415f5-e338-457e-a4e4-9c1406466d64",
+    operating_licence: "114a3641-1cc8-48c3-bce6-c6723a710725",
+    roadworthy: "a9476bdf-b029-47b0-babd-0d57b1911102",
+    insurance: "e271301f-ebed-4a01-8f33-837bddb40037",
 };
 
 interface StartPayload {
@@ -41,7 +34,7 @@ export async function POST(request: Request) {
         }
 
         const workflowId = WORKFLOW_IDS[docKind];
-        if (!workflowId || workflowId.startsWith("REPLACE_WITH")) {
+        if (!workflowId) {
             console.error(
                 `document-ai-session: no workflow configured for docKind=${docKind}`,
             );
@@ -113,7 +106,6 @@ export async function POST(request: Request) {
             );
         }
 
-        // Record session id on the driver so the webhook can look up docKind later
         const supabase = await getSupabaseServerClient();
         const { data: driver } = await supabase
             .from("drivers")
