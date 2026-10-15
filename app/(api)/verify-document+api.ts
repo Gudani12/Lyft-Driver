@@ -1,22 +1,13 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
-
-export type AutomatedDocStatus =
-  | "verified"
-  | "pending_review"
-  | "failed"
-  | "expired"
-  | "mismatch";
+import {
+  AutomatedDocStatus,
+  DocKind,
+  REQUIRED_DRIVER_DOCUMENTS,
+} from "@/lib/verification";
 
 interface VerifyDocumentPayload {
   clerkId: string;
-  docKind:
-    | "pdp"
-    | "vehicle_registration"
-    | "roadworthy"
-    | "insurance"
-    | "licence"
-    | "vehicle_photo"
-    | "id_front";
+  docKind: DocKind;
   filePath: string;
   expiryDate?: string | null;
   extractedData?: {
@@ -25,12 +16,11 @@ interface VerifyDocumentPayload {
     idNumber?: string;
     fullName?: string;
     vin?: string;
-    pdpCategory?: string; // e.g. "P" for passenger, "G" for goods
+    pdpCategory?: string;
     issueDate?: string;
   };
 }
 
-// Allowed file extensions for POPIA / Zero-Trust file upload security
 const ALLOWED_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "pdf"];
 
 export async function POST(request: Request) {
@@ -38,7 +28,6 @@ export async function POST(request: Request) {
     const body: VerifyDocumentPayload = await request.json();
     const { clerkId, docKind, filePath, expiryDate, extractedData } = body;
 
-    // 1. Authentication & input validation
     if (!clerkId || !docKind || !filePath) {
       return Response.json(
         {
@@ -49,19 +38,17 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Strict file path & security validation (Least Privilege)
-    // The storage path must strictly start with the driver's own clerkId to prevent path traversal/privilege escalation
     if (!filePath.startsWith(`${clerkId}/`)) {
       return Response.json(
         {
           error: "unauthorized_access",
-          message: "Access denied: you can only process documents stored within your own secure account directory.",
+          message:
+            "Access denied: you can only process documents stored within your own secure account directory.",
         },
         { status: 403 },
       );
     }
 
-    // Validate file extension
     const extension = filePath.split(".").pop()?.toLowerCase();
     if (!extension || !ALLOWED_EXTENSIONS.includes(extension)) {
       return Response.json(
@@ -75,31 +62,79 @@ export async function POST(request: Request) {
 
     const supabase = await getSupabaseServerClient();
 
-    // 3. Retrieve driver & vehicle details for cross-matching
     const { data: driver, error: driverError } = await supabase
       .from("drivers")
-      .select("id, full_name, first_name, last_name, id_number, driver_license_number, licence_verified, id_verified, driver_verification_status, profile_data")
+      .select(
+        "id, full_name, first_name, last_name, id_number, licence_verified, id_verified, driver_verification_status, profile_data",
+      )
       .eq("clerk_id", clerkId)
       .maybeSingle();
 
-    if (driverError || !driver) {
+    if (driverError) {
+      console.error("verify-document: driver lookup error", driverError);
       return Response.json(
         {
-          error: "driver_not_found",
-          message: "Driver record could not be found.",
+          error: "driver_lookup_failed",
+          message: "Could not load driver record. Please try again.",
+          detail: driverError.message,
         },
-        { status: 404 },
+        { status: 500 },
       );
     }
 
-    // Retrieve vehicle details for vehicle cross-matching
+    let activeDriver = driver;
+
+    if (!activeDriver) {
+      // Auto-create the driver row so uploads never fail just because
+      // the didit-session step didn't run first (e.g. after a server error).
+      console.warn("verify-document: no driver row found for", clerkId, "— auto-creating");
+      const { data: newDriver, error: insertError } = await supabase
+        .from("drivers")
+        .insert({
+          clerk_id: clerkId,
+          status: "pending",
+          verified: false,
+          driver_verification_status: "pending",
+          id_verified: false,
+          passport_verified: false,
+          licence_verified: false,
+          profile_data: {},
+        })
+        .select(
+          "id, full_name, first_name, last_name, id_number, licence_verified, id_verified, driver_verification_status, profile_data",
+        )
+        .maybeSingle();
+
+      if (insertError || !newDriver) {
+        console.error("verify-document: could not auto-create driver row", insertError);
+        return Response.json(
+          {
+            error: "driver_not_found",
+            message:
+              "Driver record could not be found or created. Please complete your profile before uploading documents.",
+            detail: insertError?.message,
+          },
+          { status: 404 },
+        );
+      }
+
+      activeDriver = newDriver;
+    }
+
+    const profileData =
+      activeDriver.profile_data && typeof activeDriver.profile_data === "object"
+        ? (activeDriver.profile_data as Record<string, any>)
+        : {};
+
+    const existingLicenceNumber: string | undefined =
+      profileData?.licence?.licence_number ?? undefined;
+
     const { data: vehicle } = await supabase
       .from("driver_vehicles")
-      .select("plate, make, model, year")
-      .eq("driver_id", driver.id)
+      .select("plate, make, model, year, vin")
+      .eq("driver_id", activeDriver.id)
       .maybeSingle();
 
-    // 4. Automated Decision & Verification Engine
     let status: AutomatedDocStatus = "pending_review";
     let confidenceScore = 0.75;
     let failureReason: string | null = null;
@@ -107,43 +142,36 @@ export async function POST(request: Request) {
 
     const now = new Date();
 
-    // --- CHECK 1: Expiry Date Validation ---
+    const clean = (value?: string | null) =>
+      (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
     if (expiryDate) {
       const expDate = new Date(expiryDate);
-      if (!isNaN(expDate.getTime())) {
-        if (expDate < now) {
-          status = "expired";
-          confidenceScore = 1.0;
-          failureReason = `Document expired on ${expiryDate}. Current and valid documentation is mandatory under South African transport regulations.`;
-        }
+      if (!isNaN(expDate.getTime()) && expDate < now) {
+        status = "expired";
+        confidenceScore = 1.0;
+        failureReason = `Document expired on ${expiryDate}. Current and valid documentation is mandatory under South African transport regulations.`;
       }
     }
 
-    // --- CHECK 2: Data Cross-Matching & Registry Alignment ---
     if (status !== "expired") {
       switch (docKind) {
         case "vehicle_registration": {
-          // Vehicle Licence Disc check
-          const registeredPlate = vehicle?.plate?.trim()?.toUpperCase();
-          const extractedPlate = extractedData?.plate?.trim()?.toUpperCase();
+          const registeredPlate = clean(vehicle?.plate);
+          const extractedPlate = clean(extractedData?.plate);
 
           if (extractedPlate && registeredPlate) {
-            // Strip spaces and special characters for plate matching (e.g. "ND 123-456" -> "ND123456")
-            const cleanRegistered = registeredPlate.replace(/[^A-Z0-9]/g, "");
-            const cleanExtracted = extractedPlate.replace(/[^A-Z0-9]/g, "");
-
-            if (cleanRegistered !== cleanExtracted) {
+            if (registeredPlate !== extractedPlate) {
               status = "mismatch";
               confidenceScore = 0.95;
-              failureReason = `Licence disc registration plate (${extractedPlate}) does not match your registered vehicle plate (${registeredPlate}).`;
+              failureReason = `Licence disc registration plate (${extractedData?.plate}) does not match your registered vehicle plate (${vehicle?.plate}).`;
             } else {
-              // High confidence plate match!
               status = "verified";
               confidenceScore = 0.94;
-              verificationMethod = "NaTIS Vehicle Register & Disc Barcode Match";
+              verificationMethod =
+                "NaTIS Vehicle Register & Disc Barcode Match";
             }
           } else {
-            // No extracted plate provided yet: marked for compliance admin review
             status = "pending_review";
             confidenceScore = 0.8;
           }
@@ -151,17 +179,20 @@ export async function POST(request: Request) {
         }
 
         case "pdp": {
-          // Professional Driving Permit (PrDP) check
-          // Under South African NLTA / RTMC: PrDP must be valid for category P (Passengers)
-          if (extractedData?.pdpCategory && !["P", "PASSENGER", "PASSENGERS"].includes(extractedData.pdpCategory.toUpperCase())) {
+          if (
+            extractedData?.pdpCategory &&
+            !["P", "PASSENGER", "PASSENGERS"].includes(
+              extractedData.pdpCategory.toUpperCase(),
+            )
+          ) {
             status = "mismatch";
             confidenceScore = 0.9;
             failureReason = `The uploaded PrDP is for Category '${extractedData.pdpCategory}', but Category 'P' (Passengers) is legally required for carpooling.`;
-          } else if (driver.licence_verified === true) {
-            // Driver's licence is already verified on NATIS; PrDP attached to driver record
+          } else if (activeDriver.licence_verified === true) {
             status = "verified";
             confidenceScore = 0.92;
-            verificationMethod = "RTMC NaTIS Driver Record & PrDP Validation";
+            verificationMethod =
+              "RTMC NaTIS Driver Record & PrDP Validation";
           } else {
             status = "pending_review";
             confidenceScore = 0.82;
@@ -169,13 +200,90 @@ export async function POST(request: Request) {
           break;
         }
 
+        case "police_clearance": {
+          if (extractedData?.issueDate) {
+            const issued = new Date(extractedData.issueDate);
+            const sixMonthsAgo = new Date();
+            sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+            if (isNaN(issued.getTime())) {
+              status = "pending_review";
+              confidenceScore = 0.75;
+            } else if (issued < sixMonthsAgo) {
+              status = "expired";
+              confidenceScore = 0.95;
+              failureReason =
+                "Police clearance is older than 6 months. SAPS clearances expire after 6 months for transport licensing.";
+            } else {
+              status = "verified";
+              confidenceScore = 0.9;
+              verificationMethod =
+                "SAPS Clearance Issue-Date & Validity Window Check";
+            }
+          } else {
+            status = "pending_review";
+            confidenceScore = 0.75;
+          }
+          break;
+        }
+
+        case "operating_card": {
+          const registeredPlate = clean(vehicle?.plate);
+          const extractedPlate = clean(extractedData?.plate);
+
+          if (
+            extractedPlate &&
+            registeredPlate &&
+            extractedPlate !== registeredPlate
+          ) {
+            status = "mismatch";
+            confidenceScore = 0.95;
+            failureReason = `Operating Card plate (${extractedData?.plate}) does not match your vehicle (${vehicle?.plate}).`;
+          } else if (expiryDate && new Date(expiryDate) < now) {
+            status = "expired";
+            confidenceScore = 1.0;
+            failureReason = `Operating Card expired on ${expiryDate}.`;
+          } else {
+            status = "verified";
+            confidenceScore = 0.88;
+            verificationMethod =
+              "NaTIS Operating Card Plate & Expiry Match";
+          }
+          break;
+        }
+
+        case "operating_licence": {
+          if (expiryDate && new Date(expiryDate) < now) {
+            status = "expired";
+            confidenceScore = 1.0;
+            failureReason = `Operating Licence expired on ${expiryDate}.`;
+          } else if (extractedData?.plate && vehicle?.plate) {
+            if (clean(extractedData.plate) !== clean(vehicle.plate)) {
+              status = "mismatch";
+              confidenceScore = 0.9;
+              failureReason =
+                "Operating Licence is registered to a different vehicle.";
+            } else {
+              status = "verified";
+              confidenceScore = 0.88;
+              verificationMethod = "PRE Operating Licence & Vehicle Match";
+            }
+          } else {
+            status = "verified";
+            confidenceScore = 0.85;
+            verificationMethod =
+              "PRE Operating Licence Upload Confirmation";
+          }
+          break;
+        }
+
         case "roadworthy":
         case "insurance": {
-          // Policy & Certificate Check
           if (expiryDate && new Date(expiryDate) > now) {
             status = "verified";
             confidenceScore = 0.88;
-            verificationMethod = "Policy Certificate Expiry & Active Status Check";
+            verificationMethod =
+              "Policy Certificate Expiry & Active Status Check";
           } else {
             status = "pending_review";
             confidenceScore = 0.75;
@@ -184,10 +292,10 @@ export async function POST(request: Request) {
         }
 
         case "vehicle_photo": {
-          // Vehicle photo: verified once uploaded and clear
           status = "verified";
           confidenceScore = 0.9;
-          verificationMethod = "Vehicle Visual Clarity & Plate Inspection";
+          verificationMethod =
+            "Vehicle Visual Clarity & Plate Inspection";
           break;
         }
 
@@ -197,28 +305,29 @@ export async function POST(request: Request) {
       }
     }
 
-    // Mask sensitive identifiers before saving/returning (Least Privilege / POPIA)
     const mask = (val?: string | null) => {
       if (!val) return null;
       if (val.length <= 4) return val;
       return `•••• ${val.slice(-4)}`;
     };
 
-    // 5. Build Document Record and Audit Trail Entry
-    const currentProfileData = driver.profile_data ?? {};
-    const existingDocs = currentProfileData.driver_documents ?? {};
-    const existingAuditLog = currentProfileData.verification_audit_log ?? [];
+    const existingDocs =
+      (profileData.driver_documents as Record<string, any>) ?? {};
+    const existingAuditLog =
+      (profileData.verification_audit_log as any[]) ?? [];
 
     const updatedDocEntry = {
       path: filePath,
-      status, // "verified" | "pending_review" | "failed" | "expired" | "mismatch"
+      status,
       confidence_score: confidenceScore,
       verification_method: verificationMethod,
       verified_at: new Date().toISOString(),
       expires_on: expiryDate ?? existingDocs[docKind]?.expires_on ?? null,
       failure_reason: failureReason,
       masked_plate: mask(extractedData?.plate ?? vehicle?.plate),
-      masked_licence: mask(extractedData?.licenceNumber ?? driver.driver_license_number),
+      masked_licence: mask(
+        extractedData?.licenceNumber ?? existingLicenceNumber,
+      ),
     };
 
     const auditEntry = {
@@ -237,22 +346,25 @@ export async function POST(request: Request) {
       [docKind]: updatedDocEntry,
     };
 
-    const newAuditLog = [auditEntry, ...existingAuditLog].slice(0, 50); // Keep last 50 audit entries
+    const newAuditLog = [auditEntry, ...existingAuditLog].slice(0, 50);
 
-    // 6. Overall Driver Verification Status Resolution
-    // Required docs: pdp, vehicle_registration, insurance + id_verified + licence_verified
-    const allRequiredApproved =
-      newDocuments?.pdp?.status === "verified" &&
-      newDocuments?.vehicle_registration?.status === "verified" &&
-      newDocuments?.insurance?.status === "verified" &&
-      (driver.id_verified === true) &&
-      (driver.licence_verified === true);
-
-    const hasAnyFailedOrMismatch = Object.values(newDocuments).some(
-      (doc: any) => doc?.status === "failed" || doc?.status === "mismatch" || doc?.status === "expired",
+    const allDocsApproved = REQUIRED_DRIVER_DOCUMENTS.every(
+      (kind) => newDocuments?.[kind]?.status === "verified",
     );
 
-    let nextDriverStatus = driver.driver_verification_status ?? "pending";
+    const allRequiredApproved =
+      allDocsApproved &&
+      activeDriver.id_verified === true &&
+      activeDriver.licence_verified === true;
+
+    const hasAnyFailedOrMismatch = Object.values(newDocuments).some(
+      (doc: any) =>
+        doc?.status === "failed" ||
+        doc?.status === "mismatch" ||
+        doc?.status === "expired",
+    );
+
+    let nextDriverStatus = activeDriver.driver_verification_status ?? "pending";
     if (allRequiredApproved) {
       nextDriverStatus = "approved";
     } else if (hasAnyFailedOrMismatch) {
@@ -261,15 +373,16 @@ export async function POST(request: Request) {
       nextDriverStatus = "pending";
     }
 
-    // 7. Persist to Supabase Database
     const { error: updateError } = await supabase
       .from("drivers")
       .update({
         driver_verification_status: nextDriverStatus,
         verified: nextDriverStatus === "approved",
-        driver_rejection_reason: hasAnyFailedOrMismatch ? failureReason : null,
+        driver_rejection_reason: hasAnyFailedOrMismatch
+          ? failureReason
+          : null,
         profile_data: {
-          ...currentProfileData,
+          ...profileData,
           driver_documents: newDocuments,
           verification_audit_log: newAuditLog,
         },
@@ -277,14 +390,19 @@ export async function POST(request: Request) {
       .eq("clerk_id", clerkId);
 
     if (updateError) {
-      console.error("Failed to update driver verification status:", updateError);
+      console.error(
+        "Failed to update driver verification status:",
+        updateError,
+      );
       return Response.json(
-        { error: "database_error", message: "Failed to persist document verification." },
+        {
+          error: "database_error",
+          message: "Failed to persist document verification.",
+        },
         { status: 500 },
       );
     }
 
-    // 8. Return response without leaking sensitive plaintext numbers
     return Response.json({
       success: true,
       docKind,
@@ -293,7 +411,8 @@ export async function POST(request: Request) {
       verificationMethod,
       failureReason,
       overallDriverStatus: nextDriverStatus,
-      maskedIdentifier: updatedDocEntry.masked_plate ?? updatedDocEntry.masked_licence,
+      maskedIdentifier:
+        updatedDocEntry.masked_plate ?? updatedDocEntry.masked_licence,
       verifiedAt: updatedDocEntry.verified_at,
     });
   } catch (err: any) {
@@ -301,7 +420,8 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error: "internal_error",
-        message: err instanceof Error ? err.message : "Internal verification error.",
+        message:
+          err instanceof Error ? err.message : "Internal verification error.",
       },
       { status: 500 },
     );

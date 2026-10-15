@@ -1,6 +1,6 @@
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,7 +16,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import CustomButton from "@/components/CustomButton";
 import { ui } from "@/constants/theme";
@@ -33,10 +36,10 @@ import {
   getSignedUrl,
   pickFromLibrary,
   startDiditVerification,
+  startDocumentAI,
   uploadDocument,
-  verifyDocumentAutomated,
   verifyDrivingLicenceNATIS,
-  verifySouthAfricanIdDatabase,
+  verifySouthAfricanIdDatabase
 } from "@/lib/verification";
 
 type SavedDoc = {
@@ -51,19 +54,33 @@ type SavedDoc = {
 const SECTIONS: { title: string; note: string; docs: DocKind[] }[] = [
   {
     title: "Permits & Authorization",
-    note: "A Professional Driving Permit (PrDP Category P) is required by law to carry passengers in South Africa.",
-    docs: ["pdp"],
+    note: "A Professional Driving Permit (PrDP Category P) and a SAPS Police Clearance are required by law to carry passengers in South Africa.",
+    docs: ["pdp", "police_clearance"],
   },
   {
     title: "Vehicle Documentation",
     note: "All vehicle documents must match your registered vehicle plate and remain valid under South African transport laws.",
-    docs: ["vehicle_registration", "roadworthy", "insurance", "vehicle_photo"],
+    docs: [
+      "vehicle_registration",
+      "operating_card",
+      "operating_licence",
+      "roadworthy",
+      "insurance",
+      "vehicle_photo",
+    ],
   },
 ];
 
 const STATUS_BANNER: Record<
   VerificationStatus,
-  { bg: string; icon: any; title: string; body: string; tint: string; badge: string }
+  {
+    bg: string;
+    icon: any;
+    title: string;
+    body: string;
+    tint: string;
+    badge: string;
+  }
 > = {
   not_submitted: {
     bg: "bg-[#F0E6FA]",
@@ -145,25 +162,30 @@ const DriverVerification = () => {
   const { getToken } = useAuth();
   const { user } = useUser();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ focus?: string }>();
 
   const [status, setStatus] = useState<VerificationStatus>("not_submitted");
   const [reason, setReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [focusedDoc, setFocusedDoc] = useState<string | null>(null);
 
-  // Documents state: server saved + local picked
   const [savedDocs, setSavedDocs] = useState<Record<string, SavedDoc>>({});
-  const [picked, setPicked] = useState<Partial<Record<DocKind, PickedImage>>>({});
-  const [expiries, setExpiries] = useState<Partial<Record<DocKind, string>>>({});
+  const [picked, setPicked] = useState<Partial<Record<DocKind, PickedImage>>>(
+    {},
+  );
+  const [expiries, setExpiries] = useState<Partial<Record<DocKind, string>>>(
+    {},
+  );
   const [uploadingKind, setUploadingKind] = useState<DocKind | null>(null);
 
-  // Active doc modal & photo preview
-  const [activeDocForAction, setActiveDocForAction] = useState<DocKind | null>(null);
+  const [activeDocForAction, setActiveDocForAction] = useState<DocKind | null>(
+    null,
+  );
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
 
   const userId = user?.id;
 
-  // Didit & Registry state
   const [diditDone, setDiditDone] = useState<Record<DiditDocType, boolean>>({
     id: false,
     passport: false,
@@ -176,7 +198,6 @@ const DriverVerification = () => {
     licence?: string | null;
   }>({});
 
-  // Driving licence modal
   const [licenceModalVisible, setLicenceModalVisible] = useState(false);
   const [licenceNumber, setLicenceNumber] = useState("");
   const [licenceNationalId, setLicenceNationalId] = useState("");
@@ -185,7 +206,6 @@ const DriverVerification = () => {
   const [licenceSubmitting, setLicenceSubmitting] = useState(false);
   const [licenceError, setLicenceError] = useState<string | null>(null);
 
-  // Home affairs modal
   const [saIdModalVisible, setSaIdModalVisible] = useState(false);
   const [saIdNumber, setSaIdNumber] = useState("");
   const [saIdFirstName, setSaIdFirstName] = useState("");
@@ -207,7 +227,7 @@ const DriverVerification = () => {
       const record = result?.data ?? {};
       setStatus(
         (record.driver_verification_status as VerificationStatus) ??
-          "not_submitted",
+        "not_submitted",
       );
       setReason(record.driver_rejection_reason ?? null);
 
@@ -248,7 +268,6 @@ const DriverVerification = () => {
         setSaIdDob(record.date_of_birth);
       }
 
-      // Load saved driver documents from profile_data
       const rawDocs = record.profile_data?.driver_documents ?? {};
       const loadedDocs: Record<string, SavedDoc> = {};
       const loadedExpiries: Partial<Record<DocKind, string>> = {};
@@ -279,87 +298,81 @@ const DriverVerification = () => {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      const focus =
+        typeof params.focus === "string" ? params.focus : null;
+      if (focus) {
+        setFocusedDoc(focus);
+        const timer = setTimeout(() => setFocusedDoc(null), 2500);
+        return () => clearTimeout(timer);
+      }
+    }, [load, params.focus]),
   );
 
-  // Progress metrics calculation
   const identityDone = diditDone.id || diditDone.passport ? 1 : 0;
   const licenceDone = diditDone.licence ? 1 : 0;
   const docsDone = REQUIRED_DRIVER_DOCUMENTS.filter(
     (kind) =>
-      Boolean(savedDocs[kind]?.path) &&
-      savedDocs[kind]?.status === "verified",
+      Boolean(savedDocs[kind]?.path) && savedDocs[kind]?.status === "verified",
   ).length;
   const totalItems = 2 + REQUIRED_DRIVER_DOCUMENTS.length;
   const totalDone = identityDone + licenceDone + docsDone;
   const progress = Math.min(100, Math.round((totalDone / totalItems) * 100));
 
-  // Directly upload and trigger automated verification
-  const handleUploadSingleDocument = async (kind: DocKind, image: PickedImage) => {
+  // ─── Upload + Document AI ──────────────────────────────────────────────
+  const handleUploadSingleDocument = async (
+    kind: DocKind,
+    image: PickedImage,
+  ) => {
     if (!user?.id) return;
     setUploadingKind(kind);
 
     try {
-      // 1. Upload to secure private storage
+      // 1. Upload to Supabase Storage
       const token = await getToken();
-      if (!token) throw new Error("Your sign-in has expired. Sign in again to upload files.");
+      if (!token)
+        throw new Error(
+          "Your sign-in has expired. Sign in again to upload files.",
+        );
       const path = await uploadDocument(user.id, kind, image, token);
 
-      // 2. Automated document validation & cross-matching
-      const result = await verifyDocumentAutomated({
-        clerkId: user.id,
-        docKind: kind,
-        filePath: path,
-        expiryDate: expiries[kind] ?? null,
-      });
-
-      // 3. Update local state
+      // 2. Show as pending immediately so admin sees it
       setSavedDocs((prev) => ({
         ...prev,
         [kind]: {
           path,
-          status: result?.status ?? "pending_review",
+          status: "pending_review",
           expires_on: expiries[kind] ?? null,
-          failure_reason: result?.failureReason ?? null,
+          failure_reason: null,
         },
       }));
       setPicked((prev) => ({ ...prev, [kind]: image }));
 
-      // 4. User feedback based on automated result
-      if (result?.status === "verified") {
-        Alert.alert(
-          "Automated Verification Passed",
-          `${DOC_LABELS[kind].title} has been verified and confirmed against official records.`,
-        );
-      } else if (result?.status === "expired") {
-        Alert.alert(
-          "Document Expired",
-          result?.failureReason ?? "This document is expired. Please upload a valid document.",
-        );
-      } else if (result?.status === "mismatch") {
-        Alert.alert(
-          "Information Mismatch",
-          result?.failureReason ?? "The details on this document do not match your registered profile.",
-        );
-      } else {
-        Alert.alert(
-          "Document Uploaded",
-          `${DOC_LABELS[kind].title} received and routed for compliance verification.`,
-        );
-      }
+      // 3. Start Document AI session for this specific upload
+      const session = await startDocumentAI(user.id, kind);
 
-      await load();
+      // 4. Open the Didit hosted flow in the WebView
+      setActiveDocForAction(null);
+      setUploadingKind(null);
+
+      router.push({
+        pathname: "/(root)/didit-webview",
+        params: {
+          url: session.url,
+          sessionId: session.session_id,
+          docType: kind,
+          clerkId: user.id,
+        },
+      });
     } catch (err: any) {
       Alert.alert("Upload Failed", err?.message ?? "Please try again.");
-    } finally {
       setUploadingKind(null);
       setActiveDocForAction(null);
     }
   };
 
-  // Trigger camera or gallery for a document
   const selectPhotoSource = (kind: DocKind, source: "camera" | "library") => {
-    const fn = source === "camera" ? () => captureImage(false) : pickFromLibrary;
+    const fn =
+      source === "camera" ? () => captureImage(false) : pickFromLibrary;
 
     (async () => {
       try {
@@ -368,12 +381,14 @@ const DriverVerification = () => {
           await handleUploadSingleDocument(kind, image);
         }
       } catch (err: any) {
-        Alert.alert("Could not select image", err?.message ?? "Please try again.");
+        Alert.alert(
+          "Could not select image",
+          err?.message ?? "Please try again.",
+        );
       }
     })();
   };
 
-  // View existing document full-screen (using short-lived signed URL)
   const viewExistingDocument = async (kind: DocKind) => {
     const local = picked[kind]?.uri;
     if (local) {
@@ -386,12 +401,18 @@ const DriverVerification = () => {
     if (saved) {
       try {
         const token = await getToken();
-        if (!token) throw new Error("Your sign-in has expired. Sign in again to view files.");
+        if (!token)
+          throw new Error(
+            "Your sign-in has expired. Sign in again to view files.",
+          );
         const signed = await getSignedUrl(saved, token, 60);
         if (signed) {
           setPreviewImageUri(signed);
         } else {
-          Alert.alert("Document", "Could not generate secure view link for this document.");
+          Alert.alert(
+            "Document",
+            "Could not generate secure view link for this document.",
+          );
         }
       } catch {
         Alert.alert("Document", "Could not load document preview.");
@@ -400,7 +421,6 @@ const DriverVerification = () => {
     setActiveDocForAction(null);
   };
 
-  // Launch Didit session
   const launchDiditSession = async (docType: DiditDocType) => {
     if (!user?.id) {
       Alert.alert("Not signed in", "Please sign in again.");
@@ -445,7 +465,12 @@ const DriverVerification = () => {
   };
 
   const handleSaIdSubmit = async () => {
-    if (!saIdNumber.trim() || !saIdFirstName.trim() || !saIdLastName.trim() || !saIdDob.trim()) {
+    if (
+      !saIdNumber.trim() ||
+      !saIdFirstName.trim() ||
+      !saIdLastName.trim() ||
+      !saIdDob.trim()
+    ) {
       setSaIdError("Please fill in all the required fields.");
       return;
     }
@@ -477,10 +502,15 @@ const DriverVerification = () => {
         );
         load();
       } else {
-        setSaIdError(res?.message ?? "Could not verify ID details with Home Affairs.");
+        setSaIdError(
+          res?.message ?? "Could not verify ID details with Home Affairs.",
+        );
       }
     } catch (err: any) {
-      setSaIdError(err?.message ?? "Verification request failed. Please check connection.");
+      setSaIdError(
+        err?.message ??
+        "Verification request failed. Please check connection.",
+      );
     } finally {
       setSaIdSubmitting(false);
     }
@@ -512,7 +542,10 @@ const DriverVerification = () => {
       if (res?.verified) {
         setLicenceModalVisible(false);
         setDiditDone((prev) => ({ ...prev, licence: true }));
-        setVerifiedNumbers((prev) => ({ ...prev, licence: licenceNumber.trim() }));
+        setVerifiedNumbers((prev) => ({
+          ...prev,
+          licence: licenceNumber.trim(),
+        }));
         Alert.alert(
           "Licence Verified!",
           "Your driving licence was successfully confirmed on the official NATIS register.",
@@ -520,17 +553,19 @@ const DriverVerification = () => {
         load();
       } else {
         setLicenceError(
-          res?.message ?? "The licence number, initials, or ID did not match NATIS records.",
+          res?.message ??
+          "The licence number, initials, or ID did not match NATIS records.",
         );
       }
     } catch (err: any) {
-      setLicenceError(err?.message ?? "Failed to connect to NATIS. Please try again.");
+      setLicenceError(
+        err?.message ?? "Failed to connect to NATIS. Please try again.",
+      );
     } finally {
       setLicenceSubmitting(false);
     }
   };
 
-  // Submit all documents for final compliance review
   const handleSubmitAllForReview = async () => {
     if (!user?.id) return;
     setSubmitting(true);
@@ -553,7 +588,10 @@ const DriverVerification = () => {
       );
       load();
     } catch (err: any) {
-      Alert.alert("Submission Error", err?.message ?? "Could not submit for review.");
+      Alert.alert(
+        "Submission Error",
+        err?.message ?? "Could not submit for review.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -567,7 +605,6 @@ const DriverVerification = () => {
     return `•••• ${num.slice(-4)}`;
   };
 
-  // Spacious, Layered Document Card (No Horizontal Pinching / Collision)
   const DocumentCard = ({ kind }: { kind: DocKind }) => {
     const docEntry = savedDocs[kind];
     const isSaved = Boolean(docEntry?.path);
@@ -576,29 +613,36 @@ const DriverVerification = () => {
     const label = DOC_LABELS[kind];
     const isReady = isSaved || isPicked;
 
-    const docStatus: AutomatedDocStatus | "unverified" =
-      isReady ? docEntry?.status ?? "pending_review" : "unverified";
+    const docStatus: AutomatedDocStatus | "unverified" = isReady
+      ? docEntry?.status ?? "pending_review"
+      : "unverified";
     const pill = STATUS_PILL_CONFIG[docStatus];
 
     return (
       <View className="mb-4 overflow-hidden rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
-        {/* Row 1: Document Icon + Title + Status Pill */}
         <View className="flex-row items-center justify-between">
           <View className="flex-1 flex-row items-center gap-3.5 pr-2">
             <View
-              className={`h-12 w-12 items-center justify-center rounded-2xl ${
-                isReady ? "bg-[#F0E6FA]" : "bg-[#F7F4FB]"
-              }`}
+              className={`h-12 w-12 items-center justify-center rounded-2xl ${isReady ? "bg-[#F0E6FA]" : "bg-[#F7F4FB]"
+                }`}
             >
               <Ionicons
                 name={
                   kind === "pdp"
                     ? "ribbon-outline"
-                    : kind === "vehicle_registration"
-                      ? "disc-outline"
-                      : kind === "insurance"
-                        ? "shield-outline"
-                        : "document-text-outline"
+                    : kind === "police_clearance"
+                      ? "shield-checkmark-outline"
+                      : kind === "vehicle_registration"
+                        ? "disc-outline"
+                        : kind === "operating_card"
+                          ? "card-outline"
+                          : kind === "operating_licence"
+                            ? "document-text-outline"
+                            : kind === "roadworthy"
+                              ? "construct-outline"
+                              : kind === "insurance"
+                                ? "shield-outline"
+                                : "document-text-outline"
                 }
                 size={22}
                 color={isReady ? "#5A189A" : "#746A7E"}
@@ -626,21 +670,32 @@ const DriverVerification = () => {
             </View>
           </View>
 
-          {/* Status Badge */}
-          <View className={`flex-row items-center gap-1.5 rounded-full px-3 py-1.5 ${pill.bg}`}>
-            <Ionicons name={pill.icon} size={13} color={pill.text.replace("text-", "").replace("[", "").replace("]", "")} />
+          <View
+            className={`flex-row items-center gap-1.5 rounded-full px-3 py-1.5 ${pill.bg}`}
+          >
+            <Ionicons
+              name={pill.icon}
+              size={13}
+              color={
+                docStatus === "verified"
+                  ? "#5A189A"
+                  : docStatus === "pending_review"
+                    ? "#D99A1B"
+                    : docStatus === "unverified"
+                      ? "#746A7E"
+                      : "#B02A2A"
+              }
+            />
             <Text className={`text-[11px] font-JakartaBold ${pill.text}`}>
               {pill.label}
             </Text>
           </View>
         </View>
 
-        {/* Row 2: Description with Comfortable Line-Height */}
         <Text className="mt-3.5 text-[12.5px] font-Jakarta leading-5 text-[#746A7E]">
           {label.help}
         </Text>
 
-        {/* Row 3: Failure or Mismatch Warning Box */}
         {docEntry?.failure_reason && (
           <View className="mt-3.5 rounded-2xl border border-[#F8D7DA] bg-[#FEF3F3] p-3">
             <View className="flex-row items-center gap-2">
@@ -655,7 +710,6 @@ const DriverVerification = () => {
           </View>
         )}
 
-        {/* Row 4: Dedicated Action Footer (Clean & Non-Compressed) */}
         <View className="mt-4 flex-row items-center justify-between border-t border-[#F0E6FA] pt-3.5">
           <Text className="text-[11.5px] font-JakartaMedium text-[#746A7E]">
             {isReady ? "Document securely stored" : "Upload current document"}
@@ -689,7 +743,6 @@ const DriverVerification = () => {
 
   return (
     <SafeAreaView className="flex-1 bg-[#F7F4FB]">
-      {/* Top Navigation Bar with Generous Padding */}
       <View className="flex-row items-center justify-between px-6 pb-4 pt-3">
         <View className="flex-row items-center gap-3.5">
           <Pressable
@@ -732,8 +785,9 @@ const DriverVerification = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* SPACIOUS ANNOUNCEMENT BANNER (No Crowding / Clear Breathing Room) */}
-          <View className={`mb-6 rounded-3xl p-6 ${banner.bg} border border-[#E9E2F0] shadow-sm`}>
+          <View
+            className={`mb-6 rounded-3xl p-6 ${banner.bg} border border-[#E9E2F0] shadow-sm`}
+          >
             <View className="flex-row items-center justify-between">
               <View className="h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm">
                 <Ionicons name={banner.icon} size={26} color={banner.tint} />
@@ -768,7 +822,6 @@ const DriverVerification = () => {
             )}
           </View>
 
-          {/* COMPLIANCE PROGRESS CARD (Generous Padding & Hierarchy) */}
           <View className="mb-8 rounded-3xl border border-[#E9E2F0] bg-white p-6 shadow-sm">
             <View className="flex-row items-center justify-between">
               <View>
@@ -792,7 +845,6 @@ const DriverVerification = () => {
             </View>
           </View>
 
-          {/* SECTION 1: OFFICIAL GOVERNMENT REGISTRIES */}
           <View className="mb-4">
             <Text className="text-[17px] font-JakartaExtraBold text-[#21152F]">
               1. Official Government Registries
@@ -802,7 +854,6 @@ const DriverVerification = () => {
             </Text>
           </View>
 
-          {/* SA ID Registry Card */}
           <View className="mb-4 rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
             <View className="flex-row items-center justify-between">
               <View className="flex-1 flex-row items-center gap-3.5 pr-2">
@@ -828,13 +879,14 @@ const DriverVerification = () => {
                 className="rounded-xl bg-[#F0E6FA] px-3.5 py-2 active:opacity-70"
               >
                 <Text className="text-[12.5px] font-JakartaBold text-[#5A189A]">
-                  {diditDone.id || diditDone.passport ? "Re-verify" : "Verify ID"}
+                  {diditDone.id || diditDone.passport
+                    ? "Re-verify"
+                    : "Verify ID"}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Driving Licence NATIS Card */}
           <View className="mb-8 rounded-3xl border border-[#E9E2F0] bg-white p-5 shadow-sm">
             <View className="flex-row items-center justify-between">
               <View className="flex-1 flex-row items-center gap-3.5 pr-2">
@@ -867,7 +919,6 @@ const DriverVerification = () => {
             </View>
           </View>
 
-          {/* SECTION 2 & 3: PERMITS & VEHICLE DOCUMENTATION */}
           {SECTIONS.map((section, idx) => (
             <View key={section.title} className="mb-6">
               <View className="mb-3.5">
@@ -880,20 +931,34 @@ const DriverVerification = () => {
               </View>
 
               {section.docs.map((kind) => (
-                <DocumentCard key={kind} kind={kind} />
+                <View
+                  key={kind}
+                  className={
+                    focusedDoc === kind
+                      ? "rounded-3xl border-2 border-[#5A189A] p-0.5"
+                      : ""
+                  }
+                >
+                  <DocumentCard kind={kind} />
+                </View>
               ))}
             </View>
           ))}
 
-          {/* FINAL SUBMIT BUTTON */}
           <View className="mt-4 pb-10">
             <CustomButton
-              title={submitting ? "Submitting for Review…" : "Submit Documents for Review"}
+              title={
+                submitting
+                  ? "Submitting for Review…"
+                  : "Submit Documents for Review"
+              }
               loading={submitting}
               onPress={handleSubmitAllForReview}
             />
             <Text className="mt-3 text-center text-[12px] font-Jakarta leading-5 text-[#A69BAF]">
-              Your documents are encrypted in transit and at rest in full compliance with the South African Protection of Personal Information Act (POPIA).
+              Your documents are encrypted in transit and at rest in full
+              compliance with the South African Protection of Personal
+              Information Act (POPIA).
             </Text>
           </View>
         </ScrollView>
@@ -916,7 +981,9 @@ const DriverVerification = () => {
             </View>
 
             <Text className="text-center text-[19px] font-JakartaExtraBold text-[#21152F]">
-              {activeDocForAction ? DOC_LABELS[activeDocForAction].title : "Document"}
+              {activeDocForAction
+                ? DOC_LABELS[activeDocForAction].title
+                : "Document"}
             </Text>
             <Text className="mt-1.5 text-center text-[13px] font-Jakarta leading-5 text-[#746A7E]">
               {activeDocForAction ? DOC_LABELS[activeDocForAction].help : ""}
@@ -924,7 +991,10 @@ const DriverVerification = () => {
 
             <View className="mt-6 gap-3">
               <TouchableOpacity
-                onPress={() => activeDocForAction && selectPhotoSource(activeDocForAction, "camera")}
+                onPress={() =>
+                  activeDocForAction &&
+                  selectPhotoSource(activeDocForAction, "camera")
+                }
                 className="flex-row items-center gap-3.5 rounded-2xl bg-[#5A189A] px-5 py-4 active:opacity-80"
               >
                 <Ionicons name="camera" size={20} color="#fff" />
@@ -934,7 +1004,10 @@ const DriverVerification = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={() => activeDocForAction && selectPhotoSource(activeDocForAction, "library")}
+                onPress={() =>
+                  activeDocForAction &&
+                  selectPhotoSource(activeDocForAction, "library")
+                }
                 className="flex-row items-center gap-3.5 rounded-2xl border border-[#E9E2F0] bg-[#F7F4FB] px-5 py-4 active:opacity-70"
               >
                 <Ionicons name="images-outline" size={20} color="#5A189A" />
@@ -944,7 +1017,10 @@ const DriverVerification = () => {
               </TouchableOpacity>
 
               {activeDocForAction &&
-                Boolean(savedDocs[activeDocForAction]?.path || picked[activeDocForAction]) && (
+                Boolean(
+                  savedDocs[activeDocForAction]?.path ||
+                  picked[activeDocForAction],
+                ) && (
                   <TouchableOpacity
                     onPress={() => viewExistingDocument(activeDocForAction)}
                     className="flex-row items-center gap-3.5 rounded-2xl border border-[#E9E2F0] bg-white px-5 py-4 active:opacity-70"
@@ -1003,7 +1079,7 @@ const DriverVerification = () => {
         </View>
       </Modal>
 
-      {/* DRIVING LICENCE NATIS MODAL */}
+      {/* DRIVING LICENCE MODAL */}
       <Modal
         visible={licenceModalVisible}
         animationType="slide"
@@ -1053,7 +1129,10 @@ const DriverVerification = () => {
               </View>
             )}
 
-            <ScrollView showsVerticalScrollIndicator={false} className="max-h-[380px]">
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              className="max-h-[380px]"
+            >
               <Text className="mb-1.5 text-[13px] font-JakartaBold text-[#21152F]">
                 Driving Licence Card Number *
               </Text>
@@ -1113,7 +1192,11 @@ const DriverVerification = () => {
 
             <View className="mt-4 mb-2">
               <CustomButton
-                title={licenceSubmitting ? "Verifying with NATIS…" : "Check NATIS Register"}
+                title={
+                  licenceSubmitting
+                    ? "Verifying with NATIS…"
+                    : "Check NATIS Register"
+                }
                 loading={licenceSubmitting}
                 onPress={handleLicenceSubmit}
               />
@@ -1151,7 +1234,8 @@ const DriverVerification = () => {
                   Verify South African ID
                 </Text>
                 <Text className="mt-1 text-[12.5px] font-Jakarta text-[#746A7E]">
-                  Instant verification directly against Department of Home Affairs.
+                  Instant verification directly against Department of Home
+                  Affairs.
                 </Text>
               </View>
               <Pressable
@@ -1172,7 +1256,10 @@ const DriverVerification = () => {
               </View>
             )}
 
-            <ScrollView showsVerticalScrollIndicator={false} className="max-h-[380px]">
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              className="max-h-[380px]"
+            >
               <Text className="mb-1.5 text-[13px] font-JakartaBold text-[#21152F]">
                 13-Digit SA ID Number *
               </Text>
@@ -1232,7 +1319,11 @@ const DriverVerification = () => {
 
             <View className="mt-4 mb-2">
               <CustomButton
-                title={saIdSubmitting ? "Verifying with Home Affairs…" : "Verify ID"}
+                title={
+                  saIdSubmitting
+                    ? "Verifying with Home Affairs…"
+                    : "Verify ID"
+                }
                 loading={saIdSubmitting}
                 onPress={handleSaIdSubmit}
               />
